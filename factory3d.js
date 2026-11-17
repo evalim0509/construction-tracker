@@ -1,0 +1,364 @@
+/* ==========================================================================
+   factory3d.js — a randomly generated 3D factory / warehouse for the demo.
+   Each project gets its own building (seeded by project id) and the model
+   shows progress: bare steel frame -> walls going up (teal) -> finished.
+   One shared WebGL renderer for the live view, one for still thumbnails,
+   so we never run out of WebGL contexts.
+   ========================================================================== */
+(function () {
+  "use strict";
+
+  const COLORS = {
+    ground: 0xE9EDF0, slab: 0xD3DAE0, steel: 0x4E5B66, wall: 0xEEF1F3, roof: 0xB8C2CA,
+    current: 0x1E9A97, glass: 0x2C3E50, office: 0xE6EBEE, crane: 0xE0B341, blue: 0x3563C4,
+    teal: 0x0F7F82, pallet: 0xC7B49A, rebar: 0x6E5B4E, edge: 0x2B3944, truck: 0xF2F4F5
+  };
+
+  function hash(str) {
+    let h = 2166136261;
+    for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); }
+    return h >>> 0;
+  }
+  function rng(seed) {
+    let a = hash(String(seed));
+    return function () {
+      a |= 0; a = (a + 0x6D2B79F5) | 0;
+      let t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+
+  const hasGL = (function () {
+    try {
+      if (!window.THREE) return false;
+      const c = document.createElement("canvas");
+      return !!(c.getContext("webgl") || c.getContext("experimental-webgl"));
+    } catch (e) { return false; }
+  })();
+
+  /* ---------- building ---------- */
+  function buildModel(opts) {
+    const T = window.THREE;
+    const r = rng(opts.seed || "x");
+    const p = clamp(opts.progress == null ? 0.5 : opts.progress, 0, 1);
+    const isWarehouse = opts.type === "warehouse";
+    const g = new T.Group();
+    const matCache = {};
+    const edgeMat = new T.LineBasicMaterial({ color: COLORS.edge, transparent: true, opacity: 0.16 });
+
+    function mat(color, extra) {
+      const key = color + JSON.stringify(extra || {});
+      if (!matCache[key]) {
+        const m = new T.MeshStandardMaterial(Object.assign({ roughness: 0.85, metalness: 0.02 }, extra || {}));
+        m.color.setHex(color).convertSRGBToLinear();
+        matCache[key] = m;
+      }
+      return matCache[key];
+    }
+    function add(geo, color, x, y, z, extra, noEdges) {
+      const m = new T.Mesh(geo, mat(color, extra));
+      m.position.set(x, y, z);
+      m.castShadow = true; m.receiveShadow = true;
+      if (!noEdges) {
+        const e = new T.LineSegments(new T.EdgesGeometry(geo, 20), edgeMat);
+        m.add(e);
+      }
+      g.add(m);
+      return m;
+    }
+    const box = (w, h, d) => new T.BoxGeometry(w, h, d);
+
+    const L = 16 + r() * 8;           // length (x)
+    const W = isWarehouse ? 11 + r() * 4 : 9 + r() * 3; // width (z)
+    const H = isWarehouse ? 6.5 + r() * 1.5 : 5 + r() * 1.5;
+
+    // ground + slab
+    const ground = new T.Mesh(new T.PlaneGeometry(160, 160), new T.ShadowMaterial({ opacity: 0.13 }));
+    ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; g.add(ground);
+    add(box(L + 14, 0.35, W + 12), COLORS.slab, 2, 0.175, 0, null, false);
+    const base = 0.35;
+
+    // progress → how much is built
+    const frameF = clamp(0.12 + p * 1.5, 0.12, 1);    // steel frame
+    const roofF = clamp((p - 0.18) / 0.55, 0, 1);      // roof
+    const clad = clamp((p - 0.3) / 0.55, 0, 1);        // finished walls
+    const bays = Math.max(5, Math.round(L / 3));
+    const bayL = L / bays;
+    const x0 = -L / 2;
+
+    for (let i = 0; i <= bays; i++) {
+      if (i / bays > frameF + 1e-6) break;
+      const x = x0 + i * bayL;
+      add(box(0.28, H, 0.28), COLORS.steel, x, base + H / 2, W / 2);
+      add(box(0.28, H, 0.28), COLORS.steel, x, base + H / 2, -W / 2);
+      add(box(0.22, 0.32, W), COLORS.steel, x, base + H, 0);
+    }
+    // eave beams along the frame
+    const frameLen = Math.min(L, Math.floor(frameF * bays) * bayL);
+    if (frameLen > 0) {
+      add(box(frameLen, 0.24, 0.24), COLORS.steel, x0 + frameLen / 2, base + H, W / 2);
+      add(box(frameLen, 0.24, 0.24), COLORS.steel, x0 + frameLen / 2, base + H, -W / 2);
+    }
+
+    const cladBays = Math.floor(clad * bays);
+    const currentBays = p < 0.97 ? Math.min(bays - cladBays, frameF >= 1 ? 2 : 1) : 0;
+    for (let i = 0; i < bays; i++) {
+      const cx = x0 + i * bayL + bayL / 2;
+      let color = null, extra = null;
+      if (i < cladBays) color = COLORS.wall;
+      else if (i < cladBays + currentBays && (i + 1) / bays <= frameF + 1e-6) { color = COLORS.current; extra = { transparent: true, opacity: 0.88 }; }
+      if (color == null) continue;
+      add(box(bayL - 0.05, H - 0.1, 0.14), color, cx, base + H / 2, W / 2, extra);
+      add(box(bayL - 0.05, H - 0.1, 0.14), color, cx, base + H / 2, -W / 2, extra);
+      // loading doors / window band on finished bays
+      if (color === COLORS.wall) {
+        if (isWarehouse && i % 2 === 1) add(box(bayL * 0.55, H * 0.55, 0.06), COLORS.steel, cx, base + H * 0.28, W / 2 + 0.1, null, true);
+        if (!isWarehouse) add(box(bayL * 0.8, 0.5, 0.06), COLORS.glass, cx, base + H * 0.72, W / 2 + 0.1, { roughness: 0.3, metalness: 0.4 }, true);
+      }
+    }
+    if (cladBays > 0) add(box(0.14, H - 0.1, W), COLORS.wall, x0, base + H / 2, 0);
+    if (cladBays >= bays) add(box(0.14, H - 0.1, W), COLORS.wall, x0 + L, base + H / 2, 0);
+
+    // roof
+    const roofBays = Math.floor(roofF * bays);
+    for (let i = 0; i < roofBays; i++) {
+      const sx = x0 + i * bayL;
+      if (!isWarehouse) {
+        // sawtooth roof (classic factory)
+        const s = new T.Shape();
+        s.moveTo(0, 0); s.lineTo(bayL, 0); s.lineTo(bayL, 1.5); s.lineTo(0, 0);
+        const geo = new T.ExtrudeGeometry(s, { depth: W + 0.4, bevelEnabled: false });
+        const m = add(geo, COLORS.roof, sx, base + H + 0.16, -W / 2 - 0.2);
+        m.castShadow = true;
+        add(box(0.06, 1.3, W + 0.2), COLORS.glass, sx + bayL - 0.05, base + H + 0.86, 0, { roughness: 0.3, metalness: 0.4 }, true);
+      } else {
+        // gable roof
+        const s = new T.Shape();
+        s.moveTo(-W / 2 - 0.4, 0); s.lineTo(W / 2 + 0.4, 0); s.lineTo(0, 1.9); s.lineTo(-W / 2 - 0.4, 0);
+        const geo = new T.ExtrudeGeometry(s, { depth: bayL, bevelEnabled: false });
+        const m = add(geo, COLORS.roof, sx, base + H + 0.16, 0);
+        m.rotation.y = Math.PI / 2;
+        m.position.x = sx; m.position.z = 0; // after the 90° turn the extrusion runs along +x
+      }
+    }
+
+    // office block at the front end
+    const oL = 4 + r() * 2, oW = W * (0.55 + r() * 0.2), floors = 2 + Math.floor(r() * 2), fh = 3.1;
+    const ox = x0 - oL / 2 - 0.2, oz = W / 2 - oW / 2 + 1;
+    if (p > 0.08) {
+      const built = p > 0.45 ? floors : Math.max(1, Math.round(floors * p * 2));
+      for (let f = 0; f < built; f++) {
+        const y = base + f * fh + fh / 2;
+        if (p > 0.45) {
+          add(box(oL, fh - 0.05, oW), COLORS.office, ox, y, oz);
+          add(box(oL * 0.86, 0.9, 0.06), COLORS.glass, ox, y + 0.25, oz + oW / 2 + 0.03, { roughness: 0.25, metalness: 0.5 }, true);
+          add(box(0.06, 0.9, oW * 0.7), COLORS.glass, ox - oL / 2 - 0.03, y + 0.25, oz, { roughness: 0.25, metalness: 0.5 }, true);
+        } else {
+          [[-1, -1], [1, -1], [-1, 1], [1, 1]].forEach(([a, b]) => add(box(0.25, fh, 0.25), COLORS.steel, ox + a * oL / 2, y, oz + b * oW / 2));
+          add(box(oL, 0.2, oW), COLORS.slab, ox, y + fh / 2, oz);
+        }
+      }
+    }
+
+    // factory extras: silos + stack
+    if (!isWarehouse) {
+      const n = 1 + Math.floor(r() * 3);
+      for (let i = 0; i < n; i++) {
+        const cyl = new T.CylinderGeometry(1.1, 1.1, 6 + r() * 2, 28);
+        const h = cyl.parameters.height;
+        add(cyl, p > 0.6 ? COLORS.wall : COLORS.roof, x0 + L + 2.4, base + h / 2, -W / 2 + 1.6 + i * 2.6);
+      }
+      if (p > 0.5) {
+        const st = new T.CylinderGeometry(0.35, 0.45, 11, 16);
+        add(st, COLORS.steel, x0 + L * 0.7, base + 5.5, -W / 2 - 1.4);
+      }
+    } else {
+      // trucks at the dock
+      for (let i = 0; i < 2; i++) {
+        if (p < 0.5) break;
+        const tx = x0 + bayL * (1.5 + i * 3);
+        add(box(1.8, 2.1, 4.8), COLORS.truck, tx, base + 1.2, W / 2 + 4.4);
+        add(box(1.8, 1.6, 1.4), COLORS.blue, tx, base + 0.95, W / 2 + 7.5);
+      }
+    }
+
+    // site cabins (containers) + material stacks
+    add(box(5, 2.4, 2.2), COLORS.teal, x0 + L * 0.35, base + 1.2, W / 2 + 4.6);
+    add(box(5, 2.4, 2.2), COLORS.blue, x0 + L * 0.35 + 5.4, base + 1.2, W / 2 + 4.6);
+    for (let i = 0; i < 4; i++) {
+      add(box(1.4, 0.7 + r() * 0.6, 1.2), COLORS.pallet, x0 + L * 0.6 + i * 1.7, base + 0.5, W / 2 + 3.2, null, false);
+    }
+    for (let i = 0; i < 6; i++) add(box(6, 0.12, 0.12), COLORS.rebar, x0 + L * 0.55 + 3, base + 0.1 + i * 0.13, -W / 2 - 3.2 - (i % 2) * 0.14, null, true);
+
+    // tower crane while building
+    if (p < 0.92) {
+      const cx = x0 + L * (0.25 + r() * 0.4), cz = -W / 2 - 3.5, ch = 17;
+      const mast = add(box(0.8, ch, 0.8), COLORS.crane, cx, base + ch / 2, cz, { roughness: 0.6 });
+      const jib = new T.Group(); jib.position.set(cx, base + ch, cz);
+      const j1 = new T.Mesh(box(16, 0.6, 0.6), mat(COLORS.crane)); j1.position.set(5, 0.3, 0); j1.castShadow = true;
+      const j2 = new T.Mesh(box(5, 0.6, 0.6), mat(COLORS.crane)); j2.position.set(-4.5, 0.3, 0);
+      const cw = new T.Mesh(box(1.6, 1.4, 1.2), mat(COLORS.steel)); cw.position.set(-6, -0.2, 0);
+      const cab = new T.Mesh(box(1.2, 1.2, 1.2), mat(COLORS.wall)); cab.position.set(0.9, -0.6, 0);
+      const top = new T.Mesh(box(0.5, 2.2, 0.5), mat(COLORS.crane)); top.position.set(0, 1.4, 0);
+      const cable = new T.Mesh(box(0.05, 7, 0.05), mat(COLORS.edge)); cable.position.set(9, -3.2, 0);
+      const hook = new T.Mesh(box(1.2, 0.6, 0.9), mat(COLORS.steel)); hook.position.set(9, -6.8, 0);
+      [j1, j2, cw, cab, top, cable, hook].forEach((m) => { m.add(new T.LineSegments(new T.EdgesGeometry(m.geometry), edgeMat)); jib.add(m); });
+      jib.rotation.y = r() * Math.PI * 2;
+      g.add(jib);
+      g.userData.jib = jib;
+      mast.userData.isCrane = true;
+    }
+
+    g.userData.size = Math.max(L + 14, W + 12);
+    const tall = p < 0.92 ? 19 : 10;
+    g.userData.radius = Math.sqrt(Math.pow((L + 16) / 2, 2) + Math.pow((W + 12) / 2, 2) + Math.pow(tall / 2, 2));
+    g.userData.cy = tall * 0.32;
+    g.position.x = -2;
+    return g;
+  }
+
+  function makeScene() {
+    const T = window.THREE;
+    const scene = new T.Scene();
+    scene.add(new T.HemisphereLight(0xffffff, 0xB9C4CC, 0.62));
+    const sun = new T.DirectionalLight(0xffffff, 1.05);
+    sun.position.set(22, 34, 18);
+    sun.castShadow = true;
+    sun.shadow.mapSize.set(1024, 1024);
+    const sc = sun.shadow.camera; sc.left = -32; sc.right = 32; sc.top = 32; sc.bottom = -32; sc.near = 1; sc.far = 100;
+    sun.shadow.bias = -0.0008;
+    sun.shadow.radius = 4;
+    scene.add(sun);
+    scene.add(new T.AmbientLight(0xffffff, 0.12));
+    return scene;
+  }
+
+  function makeRenderer(preserve) {
+    const T = window.THREE;
+    const rd = new T.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: !!preserve });
+    rd.setClearColor(0x000000, 0);
+    rd.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    rd.shadowMap.enabled = true;
+    rd.shadowMap.type = T.PCFSoftShadowMap;
+    rd.outputEncoding = T.sRGBEncoding;
+    return rd;
+  }
+
+  function disposeGroup(g) {
+    g.traverse((o) => { if (o.geometry) o.geometry.dispose(); });
+  }
+
+  function placeCamera(cam, model, aspect, zoom) {
+    const r = model.userData.radius || 20;
+    const vf = (cam.fov * Math.PI) / 180;
+    const hf = 2 * Math.atan(Math.tan(vf / 2) * aspect);
+    const d = (r / Math.sin(Math.min(vf, hf) / 2)) * (zoom || 0.82);
+    const dir = new window.THREE.Vector3(0.74, 0.5, 0.86).normalize();
+    cam.position.set(dir.x * d, dir.y * d + (model.userData.cy || 3), dir.z * d);
+    cam.lookAt(0, model.userData.cy || 3, 0);
+  }
+
+  /* ---------- live view (one shared renderer) ---------- */
+  const live = { renderer: null, scene: null, camera: null, model: null, key: "", host: null, raf: 0, rotY: -0.5, drag: null, visible: true, ro: null, io: null };
+
+  function loop() {
+    live.raf = requestAnimationFrame(loop);
+    if (!live.host || !live.host.isConnected || !live.visible || document.hidden) return;
+    const reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (!live.drag && !reduce) live.rotY += 0.0018;
+    if (live.model) {
+      live.model.rotation.y = live.rotY;
+      if (live.model.userData.jib && !reduce) live.model.userData.jib.rotation.y += 0.002;
+    }
+    live.renderer.render(live.scene, live.camera);
+  }
+
+  function resize() {
+    if (!live.host) return;
+    const w = live.host.clientWidth || 300, h = live.host.clientHeight || 300;
+    live.renderer.setSize(w, h, false);
+    live.camera.aspect = w / h;
+    live.camera.updateProjectionMatrix();
+    if (live.model) placeCamera(live.camera, live.model, w / h);
+  }
+
+  function attach(host, opts) {
+    if (!host) return;
+    if (!hasGL) { host.innerHTML = fallbackSVG(opts); return; }
+    const T = window.THREE;
+    if (!live.renderer) {
+      live.renderer = makeRenderer(false);
+      live.scene = makeScene();
+      live.camera = new T.PerspectiveCamera(30, 1, 0.1, 400);
+      const cv = live.renderer.domElement;
+      cv.setAttribute("aria-label", "3D model of the building. Drag to turn it.");
+      cv.setAttribute("role", "img");
+      cv.addEventListener("pointerdown", (e) => { live.drag = { x: e.clientX, r: live.rotY }; cv.setPointerCapture(e.pointerId); });
+      cv.addEventListener("pointermove", (e) => { if (live.drag) live.rotY = live.drag.r + (e.clientX - live.drag.x) * 0.008; });
+      const end = () => { live.drag = null; };
+      cv.addEventListener("pointerup", end); cv.addEventListener("pointercancel", end);
+      live.ro = new ResizeObserver(resize);
+      live.io = new IntersectionObserver((ents) => { live.visible = ents.some((x) => x.isIntersecting); });
+      loop();
+    }
+    const key = [opts.seed, Math.round((opts.progress || 0) * 100), opts.type].join("|");
+    if (live.key !== key) {
+      if (live.model) { live.scene.remove(live.model); disposeGroup(live.model); }
+      live.model = buildModel(opts);
+      live.scene.add(live.model);
+      live.key = key;
+      resize();
+    }
+    if (live.host !== host) {
+      if (live.host) { live.ro.unobserve(live.host); live.io.unobserve(live.host); }
+      live.host = host;
+      live.ro.observe(host); live.io.observe(host);
+    }
+    if (live.renderer.domElement.parentNode !== host) host.appendChild(live.renderer.domElement);
+    resize();
+  }
+
+  /* ---------- still thumbnails ---------- */
+  const thumbCache = {};
+  let thumbR = null, thumbScene = null, thumbCam = null;
+  function thumb(opts, w, h) {
+    w = w || 640; h = h || 360;
+    const key = [opts.seed, Math.round((opts.progress || 0) * 100), opts.type, w, h].join("|");
+    if (thumbCache[key]) return thumbCache[key];
+    if (!hasGL) return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(fallbackSVG(opts));
+    const T = window.THREE;
+    if (!thumbR) {
+      thumbR = makeRenderer(true);
+      thumbR.setPixelRatio(1.5);
+      thumbScene = makeScene();
+      thumbCam = new T.PerspectiveCamera(30, w / h, 0.1, 400);
+    }
+    thumbR.setSize(w, h, false);
+    thumbCam.aspect = w / h; thumbCam.updateProjectionMatrix();
+    const m = buildModel(opts);
+    m.rotation.y = -0.55;
+    thumbScene.add(m);
+    placeCamera(thumbCam, m, w / h, 0.74);
+    thumbR.render(thumbScene, thumbCam);
+    const url = thumbR.domElement.toDataURL("image/png");
+    thumbScene.remove(m); disposeGroup(m);
+    thumbCache[key] = url;
+    return url;
+  }
+
+  /* ---------- no-WebGL fallback: simple line drawing ---------- */
+  function fallbackSVG(opts) {
+    const p = clamp(opts && opts.progress != null ? opts.progress : 0.5, 0, 1);
+    const w = Math.round(60 + p * 180);
+    return '<svg viewBox="0 0 400 260" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="#5B6873" stroke-width="2" stroke-linejoin="round">' +
+      '<path d="M40 210h320" stroke="#C9D2D8"/>' +
+      '<path d="M70 210V120l40 30v-30l40 30v-30l40 30v-30l40 30v60z" fill="#F5F7F8"/>' +
+      '<path d="M270 210v-90h50v90" fill="#E6EBEE"/><path d="M280 140h30M280 160h30M280 180h30" stroke="#2C3E50"/>' +
+      '<rect x="70" y="214" width="' + w + '" height="8" rx="4" fill="#0F7F82" stroke="none"/>' +
+      '<path d="M330 210V60h6v150M300 64h70" stroke="#E0B341" stroke-width="3"/></svg>';
+  }
+
+  window.Factory3D = { attach, thumb, hasGL, fallbackSVG };
+})();
