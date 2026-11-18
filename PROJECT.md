@@ -114,11 +114,13 @@ site manager's phone and a selfie is taken.
 | U6 | Logging | One **"+ Log"** button → Clock in/out, Receipt or cash, Material in/out, Delay a job |
 | U7 | Home screen | Different for each role |
 | U8 | Management numbers | Spent this month, Money expected in, Low stock |
-| U9 | Calendar | Month grid on laptop, week strip on phone; tap a day for details |
+| U9 | Calendar | Month grid on laptop, week strip on phone; tap a day for details. **v0.2:** no coloured project dots (they don't scale past a few projects); each day shows only "X free" / "All busy" and a delivery icon. A project picker shades that project's days |
 | U10 | Attendance | Tap name → selfie → confirm. Hours automatic, site manager has final say |
 | U11 | Receipt | Photo + amount + what for + project + paid by; everything else under "More details" |
 | U12 | Progress | Tick off phases; % calculated |
 | U13 | Detail | Expand/collapse everywhere |
+| U16 | Stock | **v0.2:** materials grouped into categories (folders, closed by default), category chips, "Running low" chip, and a search box that works on both tabs |
+| U17 | Lists | **v0.2:** columns line up (progress bars start at the same place); fewer labels per row |
 | U14 | Language | English |
 | U15 | Dark mode | Skipped |
 | T1 | Branch | Push to `main` |
@@ -154,7 +156,7 @@ crews        id, name, trade, leaderId
 workers      id, name, crewId, dayRate, phone
 assignments  id, crewId, projectId, from, to          (crew bookings; overlap is blocked)
 attendance   id, workerId, projectId, date, in, out, inPhoto, outPhoto, status(waiting|approved|rejected), adjust{normal,ot,half,reason}
-materials    id, name, unit, qty (in yard), min
+materials    id, name, unit, qty (in yard), min, cat (category; guessed from the name if missing)
 needs        id, projectId, materialId, qty, by, status(to buy|ordered|arrived)
 moves        id, date, materialId, qty, kind(in|out|direct), projectId
 money        id, dir(in|out), status(paid|expected), date, amount, what, projectId, paidBy, supplier, ref, photo, by
@@ -182,6 +184,22 @@ If the site manager changes anything, their numbers replace the automatic ones a
 7. **e-Invoicing (LHDN MyInvois)** is being phased in. Accountants will ask for supplier TIN and e-invoice numbers. Plan fields for it before production.
 
 ## 9. Change log
+
+### v0.2.0 — 18 Nov 2026 — cleaner calendar, stock categories, aligned lists
+Client feedback: "bars should start on the same line", "calendar and side panel too cluttered, too many dots and colours", "stock needs categories and search, not an endless list".
+- **Projects list (Today):** rows now use fixed columns, so every progress bar starts and ends at the same place, whatever the status label says. On phones the bar is hidden and "% done" moves under the name.
+- **Calendar:**
+  - Removed the coloured project dots and the colour legend.
+  - Each day shows one plain line: "2 free" or "All busy" (amber), plus a truck icon when a delivery is due. Sundays and days outside the month show only the date.
+  - New **project picker** ("All projects" ▾): choose one project to shade its days and show which crews are there. This works the same with 5 projects or 50.
+  - The side panel is now short: two numbers (crews free, deliveries due), a "Who goes where" list (project → "Crews A and D", then "Free → Crew E"), deliveries only when there are some, and one "Book a crew" button.
+- **Stock:**
+  - **Search box** at the top that works on both "In the yard" and "To buy" (searches names and categories, with a clear button).
+  - **Categories:** Cement & concrete, Roof & walls, Steel, Formwork & scaffold, Plumbing & electrical, Paint & finishing, Safety, Other.
+  - The "All" view shows one folder per category (item count and how many are running low). Tap a category chip for a short list. **Running low** chip lists everything under minimum.
+  - The "To buy" list is grouped into **Needed this week** and **Needed later**. Each row has one button (Mark ordered / Mark arrived) instead of a status label plus a button; "Ordered" now shows in the description.
+  - "Add new material" asks for a category (or picks one from the name). The material picker groups options by category.
+  - Sample data grows to 31 materials so the categories have real content.
 
 ### v0.1.0 — 17 Nov 2026 — first clickable prototype
 - Welcome screen with **Try with sample data** and **Start empty**.

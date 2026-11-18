@@ -346,6 +346,8 @@
     selDay: today(),
     calMonth: today().slice(0, 7),
     stockTab: "yard",
+    stockCat: "all",
+    calProject: "",
     stockQ: "",
     moneyMonth: today().slice(0, 7),
     moneyProject: "",
@@ -548,8 +550,9 @@
       '<div class="section"><h2 class="section-title">Projects <a class="link-btn small" href="#/projects">See all</a></h2><div class="card"><div class="list">' +
       S.projects.map((p) => {
         const st = projectStatus(p);
-        return '<a class="li li-link" href="#/project/' + p.id + '" style="text-decoration:none;color:inherit"><span class="dot" style="background:' + p.color + '"></span><div class="li-main"><div class="li-title">' + esc(p.name) + '</div><div class="li-sub">' + plural(crewsAt(p.id, t).length, "crew") + " on site today</div></div>" +
-          '<div style="width:min(180px,28vw)" class="hide-sm">' + pbar(progress(p)) + "</div>" + '<span class="num small" style="width:40px;text-align:right">' + Math.round(progress(p) * 100) + "%</span>" + chip(st.label, st.cls) + "</a>";
+        const pct = Math.round(progress(p) * 100);
+        return '<a class="li li-link proj-row" href="#/project/' + p.id + '"><div class="li-main"><div class="li-title">' + esc(p.name) + '</div><div class="li-sub">' + plural(crewsAt(p.id, t).length, "crew") + ' on site today<span class="show-sm">, ' + pct + "% done</span></div></div>" +
+          '<div class="pr-bar">' + pbar(progress(p)) + '</div><span class="pr-pct num small">' + pct + '%</span><span class="pr-st">' + chip(st.label, st.cls) + "</span></a>";
       }).join("") + "</div></div></div>";
   }
 
@@ -620,15 +623,15 @@
     const m = material(n.materialId), p = project(n.projectId);
     if (!m) return "";
     const t = today();
-    const soon = n.status !== "arrived" && n.by <= addDays(t, 2);
-    const stat = n.status === "arrived" ? chip("Arrived", "good", "check") : n.status === "ordered" ? chip("Ordered", "info") : chip("Not ordered", soon ? "warn" : "");
-    let actions = "";
-    if (n.status === "to buy" && can.buy()) actions = '<button class="btn btn-sm btn-primary" data-action="need-status" data-id="' + n.id + '" data-to="ordered">Mark ordered</button>';
-    if (n.status === "ordered") actions = '<button class="btn btn-sm btn-blue" data-action="need-status" data-id="' + n.id + '" data-to="arrived">Mark arrived</button>';
-    const fromYard = n.status !== "arrived" && m.qty >= n.qty && can.buy() ? '<button class="link-btn small" data-action="need-yard" data-id="' + n.id + '">Send from yard (have ' + m.qty + ")</button>" : "";
-    return '<div class="li wrap"><div class="li-main" style="min-width:180px"><div class="li-title">' + n.qty.toLocaleString("en-MY") + " " + esc(m.unit) + ", " + esc(m.name) + "</div>" +
-      '<div class="li-sub">For ' + esc(p ? p.name : "the yard") + ", needed " + (n.by < t && n.status !== "arrived" ? '<b style="color:var(--red)">' + relDay(n.by) + "</b>" : relDay(n.by)) + (n.note ? ". " + esc(n.note) : "") + "</div>" + fromYard + "</div>" +
-      '<div class="row" style="gap:8px">' + stat + actions + "</div></div>";
+    const late = n.status !== "arrived" && n.by < t;
+    const when = "needed " + (late ? '<b style="color:var(--red);font-weight:500">' + relDay(n.by) + "</b>" : relDay(n.by));
+    let right = "";
+    if (n.status === "arrived") right = chip("Arrived", "good", "check");
+    else if (n.status === "to buy") right = can.buy() ? '<button class="btn btn-sm btn-primary" data-action="need-status" data-id="' + n.id + '" data-to="ordered">Mark ordered</button>' : '<span class="small" style="color:#B0661A">Not ordered</span>';
+    else right = '<button class="btn btn-sm btn-blue" data-action="need-status" data-id="' + n.id + '" data-to="arrived">Mark arrived</button>';
+    const fromYard = n.status !== "arrived" && m.qty >= n.qty && can.buy() ? ' <button class="link-btn small" data-action="need-yard" data-id="' + n.id + '">Send from yard instead</button>' : "";
+    return '<div class="li need-row"><div class="li-main"><div class="li-title">' + n.qty.toLocaleString("en-MY") + " " + esc(m.unit) + " " + esc(m.name) + "</div>" +
+      '<div class="li-sub">' + (n.status === "ordered" ? '<span style="color:var(--blue)">Ordered</span>, ' : "") + esc(p ? p.name : "For the yard") + ", " + when + (n.note ? ". " + esc(n.note) : "") + fromYard + "</div></div>" + right + "</div>";
   }
 
   function phasesHTML(p) {
@@ -646,8 +649,26 @@
     const asg = assignmentsOn(d);
     const projIds = Array.from(new Set(asg.map((a) => a.projectId)));
     const free = freeCrews(d);
-    const needs = S.needs.filter((n) => n.by === d && n.status !== "arrived");
-    return { asg, projIds, free, needs, sunday: S.settings.sundayOff && isSunday(d) };
+    const needs = S.needs.filter((n) => n.by === d && n.status !== "arrived" && (!ui.calProject || n.projectId === ui.calProject));
+    const mine = ui.calProject ? asg.filter((a) => a.projectId === ui.calProject).map((a) => crew(a.crewId)).filter(Boolean) : [];
+    return { asg, projIds, free, needs, mine, sunday: S.settings.sundayOff && isSunday(d) };
+  }
+  // "Crew A, Crew D" -> "Crews A and D"
+  function crewNames(cs) {
+    const names = cs.map((c) => c.name);
+    if (!names.length) return "";
+    if (names.length === 1) return names[0];
+    if (names.every((n) => /^Crew \S+$/.test(n))) {
+      const k = names.map((n) => n.slice(5));
+      return "Crews " + k.slice(0, -1).join(", ") + " and " + k[k.length - 1];
+    }
+    return names.slice(0, -1).join(", ") + " and " + names[names.length - 1];
+  }
+  function cellLine(info) {
+    if (info.sunday) return "";
+    if (ui.calProject) return info.mine.length ? '<span class="cal-free">' + esc(crewNames(info.mine)) + "</span>" : "";
+    if (!S.crews.length) return "";
+    return info.free.length ? '<span class="cal-free">' + info.free.length + " free</span>" : '<span class="cal-free none">All busy</span>';
   }
   function viewCalendar() {
     const t = today();
@@ -661,13 +682,12 @@
     let grid = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((d) => '<div class="cal-dow">' + d + "</div>").join("");
     for (let i = 0; i < cells; i++) {
       const d = addDays(gridStart, i);
+      const out = monthKey(d) !== ui.calMonth;
       const info = dayInfo(d);
-      const cls = ["cal-day", monthKey(d) !== ui.calMonth ? "out" : "", d === t ? "today" : "", d === ui.selDay ? "sel" : "", info.sunday ? "sun" : ""].join(" ");
+      const cls = ["cal-day", out ? "out" : "", d === t ? "today" : "", d === ui.selDay ? "sel" : "", info.sunday ? "sun" : "", info.mine.length && !out ? "hit" : ""].join(" ");
       grid += '<button class="' + cls + '" data-action="sel-day" data-d="' + d + '" aria-label="' + fmtDayLong(d) + '"><span class="cal-n">' + parse(d).getDate() + "</span>" +
-        (info.needs.length ? '<span class="cal-mat" title="Materials needed">' + icon("truck") + "</span>" : "") +
-        '<span class="cal-dots">' + info.projIds.map((pid) => '<span class="dot" style="background:' + project(pid).color + '"></span>').join("") + "</span>" +
-        (info.sunday ? '<span class="cal-free">Rest day</span>' : S.crews.length ? '<span class="cal-free ' + (info.free.length ? "" : "none") + '">' + (info.free.length ? info.free.length + " free" : "None free") + "</span>" : "") +
-        "</button>";
+        (!out && info.needs.length ? '<span class="cal-mat" title="Delivery due">' + icon("truck") + "</span>" : "") +
+        (out ? "" : cellLine(info)) + "</button>";
     }
 
     // phone: week strip around selected day
@@ -676,17 +696,19 @@
     let strip = "";
     for (let i = 0; i < 7; i++) {
       const d = addDays(wkStart, i), info = dayInfo(d);
-      strip += '<button class="wk-day ' + (d === t ? "today " : "") + (d === sel ? "sel" : "") + '" data-action="sel-day" data-d="' + d + '"><span class="dow">' + DOW[parse(d).getDay()] + '</span><span class="n">' + parse(d).getDate() + '</span><span class="cal-dots">' + info.projIds.map((pid) => '<span class="dot" style="background:' + project(pid).color + '"></span>').join("") + "</span></button>";
+      const line = info.sunday ? "&nbsp;" : ui.calProject ? (info.mine.length ? '<i class="wk-on"></i>' : "&nbsp;") : info.free.length ? info.free.length + " free" : '<b class="none">Busy</b>';
+      strip += '<button class="wk-day ' + (d === t ? "today " : "") + (d === sel ? "sel " : "") + (info.mine.length ? "hit" : "") + '" data-action="sel-day" data-d="' + d + '"><span class="dow">' + DOW[parse(d).getDay()] + '</span><span class="n">' + parse(d).getDate() + '</span><span class="wk-free">' + line + "</span></button>";
     }
 
-    const legend = S.projects.map((p) => '<span><span class="dot" style="background:' + p.color + '"></span>' + esc(p.name) + "</span>").join("");
-    return '<div class="page-head"><div><h1 class="page-title">Calendar</h1><p class="page-sub">Dots are projects with crews working that day. Tap a day to see who goes where.</p></div>' +
+    const filter = '<select class="input pill-select" data-change="calProject" aria-label="Show one project">' +
+      '<option value="">All projects</option>' + S.projects.map((p) => '<option value="' + p.id + '"' + (ui.calProject === p.id ? " selected" : "") + ">" + esc(p.name) + "</option>").join("") + "</select>";
+    return '<div class="page-head"><div><h1 class="page-title">Calendar</h1><p class="page-sub">' + (ui.calProject ? "Days with a crew at " + esc(project(ui.calProject).name) + " are shaded." : "How many crews are free each day. Tap a day to see who goes where.") + "</p></div>" +
       (can.manage() || role() === "site" ? '<button class="btn btn-primary" data-action="open-assign">' + icon("users") + "Book a crew</button>" : "") + "</div>" +
-      '<div class="row-between wrap" style="margin-bottom:8px"><div class="legend">' + legend + "</div>" +
+      '<div class="row-between wrap" style="margin-bottom:16px">' + filter +
       '<div class="cal-head desktop-only"><button class="icon-btn" data-action="cal-month" data-step="-1" aria-label="Previous month">' + icon("left") + '</button><div class="cal-month">' + MON_LONG[m - 1] + " " + y + '</div><button class="icon-btn" data-action="cal-month" data-step="1" aria-label="Next month">' + icon("right") + "</button>" +
-      '<button class="btn btn-sm btn-soft" data-action="cal-today">Today</button></div>' +
-      '<div class="cal-head mobile-only"><button class="icon-btn" data-action="cal-week" data-step="-7" aria-label="Previous week">' + icon("left") + '</button><div class="cal-month">' + MON[parse(wkStart).getMonth()] + " " + parse(wkStart).getDate() + " – " + MON[parse(addDays(wkStart, 6)).getMonth()] + " " + parse(addDays(wkStart, 6)).getDate() + '</div><button class="icon-btn" data-action="cal-week" data-step="7" aria-label="Next week">' + icon("right") + "</button>" +
-      '<button class="btn btn-sm btn-soft" data-action="cal-today">Today</button></div></div>' +
+      '<button class="btn btn-sm" data-action="cal-today">Today</button></div>' +
+      '<div class="cal-head mobile-only"><button class="icon-btn" data-action="cal-week" data-step="-7" aria-label="Previous week">' + icon("left") + '</button><div class="cal-month">' + parse(wkStart).getDate() + " " + MON[parse(wkStart).getMonth()] + " – " + parse(addDays(wkStart, 6)).getDate() + " " + MON[parse(addDays(wkStart, 6)).getMonth()] + '</div><button class="icon-btn" data-action="cal-week" data-step="7" aria-label="Next week">' + icon("right") + "</button>" +
+      '<button class="btn btn-sm" data-action="cal-today">Today</button></div></div>' +
       '<div class="cal-layout"><div><div class="cal-grid">' + grid + '</div><div class="week-strip">' + strip + "</div></div>" +
       '<div class="card day-panel">' + dayPanel(sel) + "</div></div>";
   }
@@ -694,21 +716,24 @@
   function dayPanel(d) {
     const info = dayInfo(d);
     let html = "<h3>" + fmtDayLong(d) + "</h3>";
-    if (info.sunday) return html + '<p class="muted mt-8">Sunday, rest day. No crews booked.</p>';
-    html += '<div class="day-sec"><div class="day-sec-title">Jobs on this day</div>';
-    if (!info.projIds.length) html += '<p class="muted small">No crews booked anywhere.</p>';
+    if (info.sunday) return html + '<p class="muted mt-8">Rest day.</p>';
+    const allNeeds = S.needs.filter((n) => n.by === d && n.status !== "arrived");
+    html += '<div class="day-stats"><div class="day-stat"><b class="num' + (info.free.length ? "" : " warn") + '">' + info.free.length + "</b><span>" + (info.free.length === 1 ? "crew free" : "crews free") + '</span></div><div class="day-stat"><b class="num">' + allNeeds.length + "</b><span>" + (allNeeds.length === 1 ? "delivery due" : "deliveries due") + "</span></div></div>";
+    html += '<div class="day-sec"><div class="day-sec-title">Who goes where</div><div class="where">';
     info.projIds.forEach((pid) => {
-      const p = project(pid);
-      const cs = info.asg.filter((a) => a.projectId === pid).map((a) => crew(a.crewId));
-      html += '<div style="margin-bottom:12px"><a href="#/project/' + pid + '" class="row" style="text-decoration:none;color:inherit;gap:8px;margin-bottom:6px"><span class="dot" style="background:' + p.color + '"></span><b style="font-weight:500">' + esc(p.name) + "</b></a>" +
-        cs.map((c) => '<span class="crew-chip">' + esc(c.name) + ' <span class="muted">' + crewWorkers(c.id).length + " people</span></span>").join("") + "</div>";
+      const cs = info.asg.filter((a) => a.projectId === pid).map((a) => crew(a.crewId)).filter(Boolean);
+      html += '<a class="where-row' + (ui.calProject === pid ? " on" : "") + '" href="#/project/' + pid + '"><span>' + esc(project(pid).name) + '</span><span class="muted">' + esc(crewNames(cs)) + "</span></a>";
     });
-    html += "</div>";
-    html += '<div class="day-sec"><div class="day-sec-title">Crews free</div>' +
-      (info.free.length ? info.free.map((c) => '<span class="crew-chip">' + esc(c.name) + ' <span class="muted">' + esc(c.trade) + "</span></span>").join("") : '<p class="small" style="color:#B0661A">Every crew is booked.</p>') + "</div>";
-    html += '<div class="day-sec"><div class="day-sec-title">Materials needed by this day</div>' +
-      (info.needs.length ? '<div class="list">' + info.needs.map((n) => { const m = material(n.materialId); return '<div class="li"><div class="li-main"><div class="li-title small">' + n.qty + " " + esc(m.unit) + ", " + esc(m.name) + '</div><div class="li-sub">' + esc(project(n.projectId).name) + "</div></div>" + (n.status === "ordered" ? chip("Ordered", "info") : chip("Not ordered", "warn")) + "</div>"; }).join("") + "</div>" : '<p class="muted small">Nothing due.</p>') + "</div>";
-    if (can.manage() || role() === "site") html += '<button class="btn btn-soft btn-block mt-16" data-action="open-assign" data-d="' + d + '">' + icon("plus") + "Book a crew from this day</button>";
+    if (info.free.length) html += '<div class="where-row"><span>Free</span><span class="free">' + esc(crewNames(info.free)) + "</span></div>";
+    if (!info.projIds.length && !info.free.length) html += '<p class="muted small">No crews yet.</p>';
+    html += "</div></div>";
+    if (allNeeds.length) {
+      html += '<div class="day-sec"><div class="day-sec-title">Deliveries due</div><div class="where">' + allNeeds.map((n) => {
+        const m = material(n.materialId), p = project(n.projectId);
+        return '<div class="where-row"><span>' + n.qty.toLocaleString("en-MY") + " " + esc(m.unit) + " " + esc(m.name.replace(/\s*\(.*\)/, "")) + '<span class="muted small" style="display:block">' + esc(p ? p.name : "Yard") + "</span></span>" + (n.status === "ordered" ? '<span class="muted small">Ordered</span>' : '<span class="small" style="color:#B0661A">Not ordered</span>') + "</div>";
+      }).join("") + "</div></div>";
+    }
+    if (can.manage() || role() === "site") html += '<button class="btn btn-soft btn-block mt-16" data-action="open-assign" data-d="' + d + '">' + icon("plus") + "Book a crew</button>";
     return html;
   }
 
@@ -766,32 +791,92 @@
   }
 
   /* ---------- Stock ---------- */
+  const CATS = [
+    { id: "concrete", name: "Cement & concrete", kw: /cement|sand|aggregate|concrete|grout|premix/i },
+    { id: "walls", name: "Roof & walls", kw: /roof|cladding|brick|block|gutter|insulation/i },
+    { id: "steel", name: "Steel", kw: /rebar|steel|beam|brc|mesh|bolt|plate|angle|channel/i },
+    { id: "formwork", name: "Formwork & scaffold", kw: /plywood|formwork|timber|scaffold|prop/i },
+    { id: "mep", name: "Plumbing & electrical", kw: /pipe|pvc|cable|wire|electric|socket|switch|fitting/i },
+    { id: "finish", name: "Paint & finishing", kw: /paint|tile|adhesive|plaster|skim|sealant/i },
+    { id: "safety", name: "Safety", kw: /helmet|safety|boot|vest|glove|harness/i },
+    { id: "other", name: "Other" }
+  ];
+  const catName = (id) => (CATS.find((c) => c.id === id) || CATS[CATS.length - 1]).name;
+  function catOf(m) {
+    if (m.cat && CATS.some((c) => c.id === m.cat)) return m.cat;
+    const c = CATS.find((x) => x.kw && x.kw.test(m.name));
+    return c ? c.id : "other";
+  }
+  const isLow = (m) => m.qty <= m.min;
+
+  function matRow(m, showCat) {
+    const low = isLow(m);
+    const recent = S.moves.filter((x) => x.materialId === m.id).slice(-4).reverse();
+    const soon = S.needs.filter((n) => n.materialId === m.id && n.status !== "arrived");
+    const fid = "mat-" + m.id;
+    const sub = [showCat ? catName(catOf(m)) : "", low ? '<span style="color:#B0661A">Running low, keep at least ' + m.min + "</span>" : "", soon.length ? soon.length + (soon.length > 1 ? " sites need it" : " site needs it") : ""].filter(Boolean).join(". ");
+    return '<details class="mrow" data-fold="' + fid + '"' + (ui.open.has(fid) ? " open" : "") + "><summary>" +
+      '<div class="li-main"><div class="li-title">' + esc(m.name) + "</div>" + (sub ? '<div class="li-sub">' + sub + "</div>" : "") + "</div>" +
+      '<span class="mat-qty num' + (low ? " low" : "") + '">' + m.qty.toLocaleString("en-MY") + '</span><span class="mat-unit muted small">' + esc(m.unit) + "</span>" +
+      '<span class="chev">' + icon("down") + "</span></summary>" +
+      '<div class="mrow-body">' +
+      (recent.length ? '<div class="day-sec-title">Last movements</div><div class="list">' + recent.map((x) => '<div class="li"><div class="li-main small">' + (x.kind === "in" ? "Arrived at yard" : x.kind === "direct" ? "Delivered to " + esc(project(x.projectId) ? project(x.projectId).name : "site") : "Sent to " + esc(project(x.projectId) ? project(x.projectId).name : "site")) + '<div class="li-sub">' + fmtDate(x.date) + (x.note ? ", " + esc(x.note) : "") + '</div></div><span class="li-amt num">' + (x.kind === "out" ? "−" : "+") + x.qty + "</span></div>").join("") + "</div>" : '<p class="muted small">No movements yet.</p>') +
+      '<div class="row wrap mt-12"><button class="btn btn-sm btn-primary" data-action="open-material" data-kind="in" data-mat="' + m.id + '">Material in</button><button class="btn btn-sm btn-soft" data-action="open-material" data-kind="out" data-mat="' + m.id + '">Material out</button>' +
+      (can.buy() ? '<button class="btn btn-sm btn-soft" data-action="new-need" data-mat="' + m.id + '">Add to buy list</button>' : "") + "</div></div></details>";
+  }
+
   function viewStock() {
     const q = ui.stockQ.trim().toLowerCase();
-    const mats = S.materials.filter((m) => !q || m.name.toLowerCase().includes(q)).sort((a, b) => (a.qty <= a.min ? 0 : 1) - (b.qty <= b.min ? 0 : 1) || a.name.localeCompare(b.name));
+    const buy = ui.stockTab === "buy";
     const needs = openNeeds();
-    const head = '<div class="page-head"><div><h1 class="page-title">Stock</h1><p class="page-sub">What is in the yard, and what each site still needs.</p></div>' +
+    const matchQ = (m) => !q || m.name.toLowerCase().includes(q) || catName(catOf(m)).toLowerCase().includes(q);
+    const sortM = (a, b) => (isLow(a) ? 0 : 1) - (isLow(b) ? 0 : 1) || a.name.localeCompare(b.name);
+    const low = S.materials.filter(isLow);
+
+    // filter chips
+    const base = buy ? needs.map((n) => material(n.materialId)).filter(Boolean) : S.materials;
+    const counts = {};
+    base.forEach((m) => { const c = catOf(m); counts[c] = (counts[c] || 0) + 1; });
+    if (ui.stockCat !== "all" && ui.stockCat !== "low" && !counts[ui.stockCat]) ui.stockCat = "all";
+    if (buy && ui.stockCat === "low") ui.stockCat = "all";
+    const fchip = (id, label, n, cls) => '<button class="fchip ' + (ui.stockCat === id ? "on " : "") + (cls || "") + '" data-action="stock-cat" data-cat="' + id + '">' + esc(label) + (n != null ? '<span class="n">' + n + "</span>" : "") + "</button>";
+    const chips = '<div class="chips" role="toolbar" aria-label="Categories">' + fchip("all", "All", base.length) +
+      (!buy && low.length ? fchip("low", "Running low", low.length, "warn") : "") +
+      CATS.filter((c) => counts[c.id]).map((c) => fchip(c.id, c.name, counts[c.id])).join("") + "</div>";
+
+    const head = '<div class="page-head"><div><h1 class="page-title">Stock</h1><p class="page-sub">What is in the yard, and what the sites still need.</p></div>' +
       '<div class="row wrap"><button class="btn" data-action="open-material" data-kind="out">' + icon("out") + "Material out</button>" +
       '<button class="btn btn-primary" data-action="open-material" data-kind="in">' + icon("in") + "Material in</button></div></div>";
-    const seg = '<div class="row-between wrap" style="margin-bottom:16px"><div class="seg"><button class="' + (ui.stockTab === "yard" ? "on" : "") + '" data-action="stock-tab" data-tab="yard">In the yard</button><button class="' + (ui.stockTab === "buy" ? "on" : "") + '" data-action="stock-tab" data-tab="buy">To buy (' + needs.length + ")</button></div>" +
-      (ui.stockTab === "yard" ? '<div class="search" style="min-width:min(320px,100%)">' + icon("search") + '<input class="input" type="search" placeholder="Find a material" value="' + esc(ui.stockQ) + '" data-input="stockQ" aria-label="Find a material"></div>' : (can.buy() ? '<button class="btn" data-action="new-need">' + icon("plus") + "Add something to buy</button>" : "")) + "</div>";
-    if (ui.stockTab === "buy") {
-      return head + seg + '<div class="card"><div class="list">' + (needs.length ? needs.map(needRow).join("") : empty("Nothing on the buy list.")) + "</div></div>";
+    const bar = '<div class="stock-bar"><div class="seg"><button class="' + (!buy ? "on" : "") + '" data-action="stock-tab" data-tab="yard">In the yard</button><button class="' + (buy ? "on" : "") + '" data-action="stock-tab" data-tab="buy">To buy (' + needs.length + ")</button></div>" +
+      '<div class="search grow">' + icon("search") + '<input class="input" type="search" placeholder="Search, e.g. cement or rebar" value="' + esc(ui.stockQ) + '" data-input="stockQ" aria-label="Search materials">' + (q ? '<button class="search-clear" data-action="stock-clear" aria-label="Clear search">' + icon("x") + "</button>" : "") + "</div></div>";
+
+    const inCat = (m) => ui.stockCat === "all" || (ui.stockCat === "low" ? isLow(m) : catOf(m) === ui.stockCat);
+
+    if (buy) {
+      const list = needs.filter((n) => { const m = material(n.materialId); return m && inCat(m) && matchQ(m); });
+      const wk = addDays(today(), 7);
+      const soon = list.filter((n) => n.by <= wk), later = list.filter((n) => n.by > wk);
+      const group = (title, arr) => arr.length ? '<div class="group-title">' + title + '<span class="muted">' + arr.length + "</span></div>" + '<div class="card" style="padding:6px 22px"><div class="list">' + arr.map(needRow).join("") + "</div></div>" : "";
+      return head + bar + chips +
+        (list.length ? group("Needed this week", soon) + group("Needed later", later) : '<div class="card">' + empty(q ? "Nothing on the buy list matches “" + esc(ui.stockQ) + "”." : "Nothing on the buy list.") + "</div>") +
+        (can.buy() ? '<button class="btn btn-soft mt-16" data-action="new-need">' + icon("plus") + "Add something to buy</button>" : "");
     }
-    return head + seg + '<div class="card" style="padding:8px 22px">' + (mats.length ? mats.map((m) => {
-      const low = m.qty <= m.min;
-      const recent = S.moves.filter((x) => x.materialId === m.id).slice(-4).reverse();
-      const soon = S.needs.filter((n) => n.materialId === m.id && n.status !== "arrived");
-      const fid = "mat-" + m.id;
-      return '<details class="mrow" data-fold="' + fid + '"' + (ui.open.has(fid) ? " open" : "") + "><summary>" +
-        '<div class="li-main"><div class="li-title">' + esc(m.name) + '</div><div class="li-sub">' + (low ? '<span style="color:#B0661A">Low. Keep at least ' + m.min + "</span>" : "Keep at least " + m.min) + (soon.length ? ", " + soon.length + " site request" + (soon.length > 1 ? "s" : "") : "") + "</div></div>" +
-        '<span class="num" style="font-size:22px;font-weight:300' + (low ? ";color:var(--amber)" : "") + '">' + m.qty.toLocaleString("en-MY") + '</span><span class="muted small" style="width:58px">' + esc(m.unit) + "</span>" +
-        '<span class="chev">' + icon("down") + "</span></summary>" +
-        '<div class="mrow-body">' +
-        (recent.length ? '<div class="day-sec-title">Recent movements</div><div class="list">' + recent.map((x) => '<div class="li"><span class="chip ' + (x.kind === "in" ? "teal" : x.kind === "direct" ? "info" : "") + '">' + (x.kind === "in" ? "In" : x.kind === "direct" ? "To site" : "Out") + '</span><div class="li-main small">' + (x.projectId ? esc(project(x.projectId) ? project(x.projectId).name : "") : "Yard") + (x.note ? ", " + esc(x.note) : "") + '<div class="li-sub">' + fmtDate(x.date) + '</div></div><span class="li-amt num">' + (x.kind === "out" ? "−" : "+") + x.qty + "</span></div>").join("") + "</div>" : '<p class="muted small">No movements yet.</p>') +
-        '<div class="row wrap mt-12"><button class="btn btn-sm btn-primary" data-action="open-material" data-kind="in" data-mat="' + m.id + '">Material in</button><button class="btn btn-sm btn-soft" data-action="open-material" data-kind="out" data-mat="' + m.id + '">Material out</button>' +
-        (can.buy() ? '<button class="btn btn-sm btn-soft" data-action="new-need" data-mat="' + m.id + '">Add to buy list</button>' : "") + "</div></div></details>";
-    }).join("") : empty(q ? "No material matches “" + esc(ui.stockQ) + "”." : "No materials yet.", '<br><button class="btn btn-primary" data-action="open-material" data-kind="in">Add the first delivery</button>')) + "</div>";
+
+    const list = S.materials.filter((m) => inCat(m) && matchQ(m)).sort(sortM);
+    if (!S.materials.length) return head + bar + '<div class="card">' + empty("No materials yet.", '<br><button class="btn btn-primary" data-action="open-material" data-kind="in">Add the first delivery</button>') + "</div>";
+    if (!list.length) return head + bar + chips + '<div class="card">' + empty("No material matches “" + esc(ui.stockQ) + "”.", '<br><button class="btn btn-soft" data-action="stock-clear">Clear search</button>') + "</div>";
+
+    // searching or one category picked: a short flat list
+    if (q || ui.stockCat !== "all") {
+      return head + bar + chips + (q ? '<p class="small muted" style="margin:-4px 0 10px">' + plural(list.length, "result") + "</p>" : "") +
+        '<div class="card" style="padding:6px 22px">' + list.map((m) => matRow(m, !!q || ui.stockCat === "low")).join("") + "</div>";
+    }
+    // everything: one folder per category, closed by default
+    return head + bar + chips + CATS.filter((c) => counts[c.id]).map((c) => {
+      const ms = S.materials.filter((m) => catOf(m) === c.id).sort(sortM);
+      const nLow = ms.filter(isLow).length;
+      return fold("cat-" + c.id, esc(c.name), plural(ms.length, "item") + (nLow ? ', <span style="color:#B0661A">' + nLow + " running low</span>" : ""), "", ms.map((m) => matRow(m, false)).join(""));
+    }).join("");
   }
 
   /* ---------- Money ---------- */
@@ -1051,8 +1136,9 @@
       const warn = kind === "out" && m && +qty > m.qty ? '<div class="form-warn">The yard only has ' + m.qty + " " + esc(m.unit) + ". Saving will show a negative number until the count is fixed.</div>" : "";
       return sheetHead("Material in / out") +
         '<div class="seg full mt-12"><button class="' + (kind === "in" ? "on" : "") + '" data-action="pick" data-k="kind" data-v="in">' + icon("in", ' style="width:17px;height:17px;vertical-align:-3px"') + ' Arrived</button><button class="' + (kind === "out" ? "on" : "") + '" data-action="pick" data-k="kind" data-v="out">' + icon("out", ' style="width:17px;height:17px;vertical-align:-3px"') + " Used or sent to site</button></div>" +
-        '<label class="field"><span>Which material</span><select class="input" data-f="materialId" data-rerender="1">' + S.materials.map((x) => '<option value="' + x.id + '"' + (x.id === mid ? " selected" : "") + ">" + esc(x.name) + " (yard: " + x.qty + " " + esc(x.unit) + ")</option>").join("") + '<option value="__new"' + (mid === "__new" ? " selected" : "") + ">+ A new material</option></select></label>" +
-        (mid === "__new" ? '<div class="grid-2" style="gap:12px"><label class="field"><span>Name</span><input class="input" data-f="newName" value="' + esc(val("newName", "")) + '" placeholder="e.g. Tile adhesive"></label><label class="field"><span>Counted in</span><input class="input" data-f="newUnit" value="' + esc(val("newUnit", "")) + '" placeholder="bags, pcs, tonnes"></label></div>' : "") +
+        '<label class="field"><span>Which material</span><select class="input" data-f="materialId" data-rerender="1">' + CATS.map((c) => { const ms = S.materials.filter((x) => catOf(x) === c.id); return ms.length ? '<optgroup label="' + esc(c.name) + '">' + ms.map((x) => '<option value="' + x.id + '"' + (x.id === mid ? " selected" : "") + ">" + esc(x.name) + " (yard: " + x.qty + " " + esc(x.unit) + ")</option>").join("") + "</optgroup>" : ""; }).join("") + '<option value="__new"' + (mid === "__new" ? " selected" : "") + ">+ A new material</option></select></label>" +
+        (mid === "__new" ? '<div class="grid-2" style="gap:12px"><label class="field"><span>Name</span><input class="input" data-f="newName" value="' + esc(val("newName", "")) + '" placeholder="e.g. Tile adhesive"></label><label class="field"><span>Counted in</span><input class="input" data-f="newUnit" value="' + esc(val("newUnit", "")) + '" placeholder="bags, pcs, tonnes"></label></div>' +
+          '<label class="field"><span>Category</span><select class="input" data-f="newCat"><option value="">Choose for me</option>' + CATS.map((c) => '<option value="' + c.id + '"' + (val("newCat") === c.id ? " selected" : "") + ">" + esc(c.name) + "</option>").join("") + "</select></label>" : "") +
         '<div class="field"><span>How many' + (m ? " " + esc(m.unit) : "") + '</span><div class="stepper"><button type="button" data-action="qty-step" data-step="-1" aria-label="Less">−</button><input class="input num" type="number" inputmode="numeric" min="0" data-f="qty" value="' + esc(qty) + '" placeholder="0" autofocus><button type="button" data-action="qty-step" data-step="1" aria-label="More">+</button></div></div>' +
         '<label class="field"><span>' + (kind === "out" ? "Which project" : "Project <em>(only if it went straight to site)</em>") + '</span><select class="input" data-f="projectId" data-rerender="1">' + projOptions(val("projectId", kind === "out" && role() === "site" ? siteId() : ""), true, kind === "out" ? "Choose a project" : "No, it went to the yard") + "</select></label>" +
         (kind === "in" && val("projectId", "") ? '<div class="form-note">Goes straight to site, so the yard count will not change.</div>' : "") +
@@ -1282,6 +1368,7 @@
       if (mid === "__new") {
         if (!(f.newName || "").trim()) return fail("Type the name of the new material.");
         const m = { id: uid("m"), name: f.newName.trim(), unit: (f.newUnit || "pcs").trim(), qty: 0, min: 0 };
+        m.cat = f.newCat || catOf(m);
         S.materials.push(m); mid = m.id;
       }
       const m = material(mid);
@@ -1314,6 +1401,8 @@
       commit("Added to the buy list.");
     },
     "stock-tab"(el) { ui.stockTab = el.dataset.tab; render(); },
+    "stock-cat"(el) { ui.stockCat = el.dataset.cat; render(); },
+    "stock-clear"() { ui.stockQ = ""; render(); const n = $('[data-input="stockQ"]'); if (n) n.focus(); },
 
     /* projects */
     tick(el) {
@@ -1480,6 +1569,7 @@
     if (c === "role") { S.role = el.value; save(); ui.attSite = null; enterRoute(); render(); toast("Now viewing as " + ROLE_LABEL[S.role].toLowerCase() + "."); }
     if (c === "site") { S.people.site.siteId = el.value; save(); render(); }
     if (c === "moneyProject") { ui.moneyProject = el.value; render(); }
+    if (c === "calProject") { ui.calProject = el.value; render(); }
     if (c === "attSite") { ui.attSite = el.value; ui.attDate = pickAttDate(el.value); render(); }
     if (c === "clockSite" && ui.sheet) { ui.sheet.siteId = el.value; renderSheet(); }
     if (el.dataset.setting) {
