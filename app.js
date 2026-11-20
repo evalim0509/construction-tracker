@@ -59,7 +59,7 @@
     return RM(v);
   };
   const plural = (n, one, many) => n + " " + (n === 1 ? one : (many || one + "s"));
-  const hrs = (h) => { const v = Math.round(h * 4) / 4; return (v % 1 === 0 ? v : v.toFixed(2).replace(/0$/, "")) + "h"; };
+  const hrs = (h) => { const m = Math.round((h || 0) * 60), H = Math.floor(m / 60), M = m % 60; return M ? (H ? H + "h " : "") + M + "m" : H + "h"; };
   const initials = (name) => name.replace(/^(Md\.|Mohd)\s+/i, "").split(/\s+/).slice(0, 2).map((x) => x[0]).join("").toUpperCase();
 
   /* ---------- icons (Lucide-style outlines) ---------- */
@@ -131,7 +131,9 @@
     S.notifications = S.notifications || [];
     S.audit = S.audit || [];
     S.people.worker = S.people.worker || { siteId: null, workerId: null, lang: "en" };
-    S.settings = Object.assign({ matchMinutes: 15, payDay: 7, geofenceM: 200 }, S.settings);
+    S.settings = Object.assign({ matchMinutes: 15, payDay: 7, geofenceM: 200, rounding: "exact", rejectReasons: ["Not on site", "Photo is not this worker", "Clocked in twice", "Left early without asking"] }, S.settings);
+    // keep the site manager's original photo times, so later changes never overwrite them
+    S.attendance.forEach((a) => { if (!a.orig && a.inPhoto && a.in && !(a.self && a.self.in === a.in)) a.orig = { in: a.in, out: a.outPhoto ? a.out : null }; });
   }
   function save() {
     try { localStorage.setItem(KEY, JSON.stringify(S)); }
@@ -326,15 +328,22 @@
      - in / out / inPhoto / outPhoto : the site manager's record (wins for pay)
      - self {in, out, inPhoto, outPhoto} : the worker's own clock-in on their phone
      eff() gives the times used for pay: site manager's if there, else the worker's. */
+  // r.self = worker's original times (never changed by anyone); r.orig = site manager's original photo times;
+  // r.in / r.out = the site manager's time (confirmed or written). A rejected side is not used for pay.
   function eff(r) {
     const s = r.self || {};
-    return { in: r.in || s.in || null, out: r.out || s.out || null, inPhoto: r.inPhoto || s.inPhoto || null, outPhoto: r.outPhoto || s.outPhoto || null };
+    return { in: r.in || (r.rejectIn ? null : s.in) || null, out: r.out || (r.rejectOut ? null : s.out) || null, inPhoto: r.inPhoto || s.inPhoto || null, outPhoto: r.outPhoto || s.outPhoto || null };
   }
   const isDone = (r) => !!eff(r).out;
   const hasPhone = (w) => !!(w && w.hasPhone);
   function matchOf(r) {
     const w = worker(r.workerId), s = r.self || {};
     const tol = S.settings.matchMinutes || 15;
+    if (r.rejectIn || r.rejectOut) {
+      const needIn = r.rejectIn && !r.in, needOut = r.rejectOut && !r.out && r.date < today();
+      if (needIn || needOut) return { key: "rej", label: (needIn ? "Clock in" : "Clock out") + " rejected, write a time", cls: "warn", flag: true };
+      return { key: "rejok", label: "Site manager time used", cls: "" };
+    }
     if (!s.in && !hasPhone(w)) return { key: "single", label: "Site manager only", cls: "" };
     if (s.in && !r.in) return { key: "worker", label: r.date === today() ? "Selfie in, waiting for you" : "Site manager did not confirm", cls: "warn", flag: true };
     if (r.in && !s.in) return { key: "manager", label: "Worker did not clock in", cls: "warn", flag: true };
@@ -370,9 +379,9 @@
       case "confirm-in": return "confirmed " + w + " selfie clock-in (" + v + ")";
       case "confirm-out": return "confirmed " + w + " selfie clock-out (" + v + ")";
       case "approve": return "approved " + w + " day" + d + (v ? ": " + v : "");
-      case "reject": return "rejected " + w + " day" + d + rs;
-      case "restore": return "restored " + w + " day" + d + " from Rejected";
-      case "change": return "changed " + w + " day" + d + ": " + v + rs;
+      case "reject": return "rejected " + w + " " + (a.part === "in" ? "clock in" + (v ? " " + v : "") : a.part === "out" ? "clock out" + (v ? " " + v : "") : "whole day") + d + rs;
+      case "restore": return "restored " + w + " " + (a.part === "in" ? "clock in" : a.part === "out" ? "clock out" : "day") + d + " from Rejected";
+      case "change": return "wrote site manager time for " + w + " day" + d + ": " + v + rs;
       case "add": return "added " + w + " day" + d + " by hand: " + v + rs;
       case "auto": return "set " + w + " hours" + d + " back to automatic";
       case "report": return "reported a problem with " + fmtDay(a.forDate) + ": " + v;
@@ -413,15 +422,26 @@
     const e = eff(rec);
     if (!e.in) return null;
     if (!e.out) return { open: true };
-    let worked = (toMin(e.out) - toMin(e.in)) / 60;
-    if (worked < 0) worked += 24;
-    if (worked > s.breakAfter) worked -= s.breakHours;
-    worked = Math.max(0, worked);
+    const raw = workedHours(e.in, e.out);
+    const round = rec.round || s.rounding || "exact";
+    const worked = roundHours(raw, round);
     const half = worked < s.halfDayUnder;
-    const auto = { worked, normal: Math.min(worked, s.normalHours), ot: Math.max(0, Math.floor((worked - s.normalHours) * 2) / 2), half };
-    const final = rec.adjust ? Object.assign({}, auto, { normal: +rec.adjust.normal, ot: +rec.adjust.ot, half: !!rec.adjust.half }) : auto;
-    return { auto, final, changed: !!rec.adjust };
+    const auto = { worked, raw, round, normal: Math.min(worked, s.normalHours), ot: Math.max(0, worked - s.normalHours), half };
+    // older records may carry manual normal/OT numbers; newer changes are worked out from the times
+    const manual = rec.adjust && rec.adjust.normal != null;
+    const final = manual ? Object.assign({}, auto, { normal: +rec.adjust.normal, ot: +rec.adjust.ot, half: !!rec.adjust.half }) : auto;
+    return { auto, final, changed: !!rec.adjust || !!rec.mgrReason };
   }
+  // time between in and out, minus the lunch break when the day is long enough
+  function workedHours(a, b) {
+    const s = S.settings;
+    let w = (toMin(b) - toMin(a)) / 60;
+    if (w < 0) w += 24;
+    if (w > s.breakAfter) w -= s.breakHours;
+    return Math.max(0, w);
+  }
+  const ROUNDING = { exact: "Exact", "30": "Nearest 30 min", "60": "Nearest hour" };
+  const roundHours = (h, k) => (k === "60" ? Math.round(h) : k === "30" ? Math.round(h * 2) / 2 : Math.round(h * 60) / 60);
   function hoursText(h) {
     if (!h) return "";
     if (h.open) return "Still on site";
@@ -1174,7 +1194,8 @@
     if (S.attendance.some((a) => a.projectId === sid && a.date === today())) return today();
     const w = waitingDays(sid); return w.length ? w[w.length - 1].d : today();
   }
-  const needsConfirm = (r) => !!(r.self && ((r.self.in && !r.in) || (r.self.out && r.in && !r.out)));
+  const needsConfirm = (r) => !!(r.self && ((r.self.in && !r.in && !r.rejectIn) || (r.self.out && r.in && !r.out && !r.rejectOut)));
+  const partRejected = (r) => !!(r.rejectIn || r.rejectOut);
 
   // one plain status per worker
   function attStatus(r) {
@@ -1182,6 +1203,7 @@
     if (r.status === "rejected") return { label: "Rejected", cls: "bad" };
     if (r.status === "approved") return { label: "Approved", cls: "good" };
     if (needsConfirm(r)) return { label: r.date === today() ? "Waiting for you" : "Not confirmed", cls: "warn" };
+    if (mt.key === "rej") return { label: mt.label, cls: "warn" };
     if (mt.key === "diff") return { label: mt.label.replace("Times differ by", "Times differ"), cls: "warn" };
     if (mt.key === "manager") return { label: "No selfie from worker", cls: "warn" };
     if (mt.key === "out") return { label: "Check clock-out", cls: "warn" };
@@ -1207,21 +1229,57 @@
       (dsp ? '<span class="mini-ic warn" title="Worker report">' + icon("flag") + "</span>" : "");
     const both = s.in && r.in;
     const body =
-      '<div class="att-photos"><figure>' + img(e.inPhoto, "", w.name + " clock in") + "<figcaption>In " + esc(e.in || "") + "</figcaption></figure><figure>" + (done ? img(e.outPhoto, "", w.name + " clock out") : '<div class="photo-missing">Not out yet</div>') + "<figcaption>" + (done ? "Out " + esc(e.out) : "&nbsp;") + "</figcaption></figure></div>" +
-      (r.confirmedIn ? '<div class="small muted">Selfie times confirmed by site manager at ' + esc(r.confirmedIn) + (r.confirmedOut ? " and " + esc(r.confirmedOut) : "") + "</div>" : both ? '<div class="small muted">Worker ' + esc(s.in) + (s.out ? "–" + esc(s.out) : "") + ", site manager " + esc(r.in) + (r.out ? "–" + esc(r.out) : "") + "</div>" : "") +
-      (done && h ? '<div class="small">' + esc(hoursText(h)) + (h.changed ? ' <span class="muted">(changed by site manager: ' + esc(r.adjust.reason || "") + ")</span>" : "") + (can.seePay() && r.status !== "rejected" ? ' <span class="muted">Pay ' + RM(Math.round(payFor(r))) + "</span>" : "") + "</div>" : "") +
+      '<div class="ct ct-solo"><div class="ct-row ct-head"><span>Clock in</span><span>Clock out</span></div><div class="ct-row">' + timeCell(r, "in", true) + timeCell(r, "out", true) + "</div></div>" +
+      (done && h ? '<div class="small">Duration ' + durLine(r) + (r.mgrReason ? ' <span class="muted">Site manager: “' + esc(r.mgrReason) + "”</span>" : "") + (can.seePay() && r.status !== "rejected" ? ' <span class="muted">Pay ' + RM(Math.round(payFor(r))) + "</span>" : "") + "</div>" : "") +
       (dsp ? '<div class="report">' + icon("flag") + "<div><b>" + esc(w.name.split(" ")[0]) + " says: " + esc(dsp.reason) + "</b>" + (dsp.note ? "<br>“" + esc(dsp.note) + "”" : "") + "</div>" + (can.approve() ? '<button class="btn btn-sm" data-action="dispute-done" data-id="' + dsp.id + '">Sorted</button>' : "") + "</div>" : "") +
-      (r.status === "rejected" && r.rejectReason ? '<div class="report">' + icon("x") + "<div><b>Rejected:</b> " + esc(r.rejectReason) + "</div></div>" : "") +
+      (r.status === "rejected" && r.rejectReason ? '<div class="report">' + icon("x") + "<div><b>Whole day rejected:</b> " + esc(r.rejectReason) + "</div></div>" : "") +
       (r.note ? '<div class="small muted">' + esc(r.note) + "</div>" : "") +
-      (r.status === "rejected" && can.approve() ? '<div class="row wrap" style="gap:8px"><button class="btn btn-sm btn-primary" data-action="att-restore" data-id="' + r.id + '">' + icon("undo") + "Restore</button></div>" :
+      (r.status === "rejected" && can.approve() ? '<div class="row wrap" style="gap:8px"><button class="btn btn-sm btn-primary" data-action="att-restore" data-id="' + r.id + '" data-part="day">' + icon("undo") + "Restore day</button></div>" :
       can.approve() ? '<div class="row wrap" style="gap:8px">' + (approveInBody ? '<button class="btn btn-sm btn-soft" data-action="att-ok" data-id="' + r.id + '">Approve</button>' : "") +
-        '<button class="btn btn-sm btn-soft" data-action="att-edit" data-id="' + r.id + '">' + icon("edit") + "Change</button>" +
+        (r.rejectIn ? '<button class="btn btn-sm btn-soft" data-action="att-restore" data-id="' + r.id + '" data-part="in">' + icon("undo") + "Restore clock in</button>" : "") +
+        (r.rejectOut ? '<button class="btn btn-sm btn-soft" data-action="att-restore" data-id="' + r.id + '" data-part="out">' + icon("undo") + "Restore clock out</button>" : "") +
+        '<button class="btn btn-sm btn-soft" data-action="att-edit" data-id="' + r.id + '">' + icon("edit") + "Write my time</button>" +
         '<button class="btn btn-sm btn-danger" data-action="att-no" data-id="' + r.id + '">' + icon("x") + "Reject</button></div>" : "") +
       recHistory(r);
     return '<details class="arow' + (ui.attFocus === r.workerId ? " focus" : "") + '" data-fold="' + fid + '"' + (ui.open.has(fid) || ui.attFocus === r.workerId ? " open" : "") + "><summary>" +
       '<span class="arow-pic">' + img(e.inPhoto, "", w.name) + "</span>" +
       '<span class="li-main"><span class="arow-name">' + esc(w.name) + icons + '</span><span class="arow-sub">' + esc(time) + " " + chip(st.label, st.cls) + "</span></span>" +
       btn + '</summary><div class="arow-body">' + body + "</div></details>";
+  }
+
+  /* Clock in | Clock out table. Big time, small date. The worker's original time always stays visible. */
+  function timeCell(r, side, withPhoto) {
+    const s = r.self || {}, og = r.orig || {};
+    const wT = s[side], mT = r[side], oT = og[side];
+    const rej = side === "in" ? r.rejectIn : r.rejectOut;
+    const fin = eff(r)[side];
+    const photo = side === "in" ? (s.inPhoto || r.inPhoto) : (s.outPhoto || r.outPhoto);
+    let src = "";
+    if (wT && mT && wT !== mT) src = "Worker " + esc(wT) + (rej ? " (rejected)" : "") + ", site manager wrote " + esc(mT);
+    else if (wT && mT) src = "Selfie, confirmed";
+    else if (wT) src = rej ? "Worker " + esc(wT) + ", rejected" : "Selfie, not confirmed yet";
+    else if (mT) src = oT && oT !== mT ? "Photo " + esc(oT) + ", site manager wrote " + esc(mT) : oT ? "Site manager photo" : "Written by site manager";
+    return '<div class="ct-cell' + (rej && !mT ? " rej" : "") + '">' + (withPhoto ? '<div class="ct-photo">' + (photo ? img(photo, "", side === "in" ? "Clock in photo" : "Clock out photo") : '<div class="photo-missing">No photo</div>') + "</div>" : "") +
+      '<div class="ct-time num">' + (fin ? esc(fin) : rej ? '<s>' + esc(wT || oT || "") + "</s>" : "–") + "</div>" +
+      '<div class="ct-date">' + fmtDay(r.date) + "</div>" +
+      (src ? '<div class="ct-src">' + src + "</div>" : !fin ? '<div class="ct-src">' + (side === "out" ? "Not out yet" : "No clock-in") + "</div>" : "") +
+      (rej ? '<div class="ct-rej">Rejected: ' + esc(rej.reason) + "</div>" : "") + "</div>";
+  }
+  function durLine(r) {
+    const h = calcHours(r);
+    if (!h) return "";
+    if (h.open) return '<span class="muted">Still on site</span>';
+    return "<b>" + hrs(h.final.worked) + "</b>" + (h.auto.round !== "exact" ? ' <span class="muted">(' + ROUNDING[h.auto.round].toLowerCase() + ", exact " + hrs(h.auto.raw) + ")</span>" : "") + ' <span class="muted">' + esc(hoursText(h)) + "</span>";
+  }
+  // rows of days; opts.names shows the worker's name in the first column
+  function ctTable(recs, opts) {
+    opts = opts || {};
+    const head = '<div class="ct-row ct-head' + (opts.names ? " named" : "") + '">' + (opts.names ? "<span>Worker</span>" : "") + "<span>" + (opts.inLabel || "Clock in") + "</span><span>" + (opts.outLabel || "Clock out") + "</span></div>";
+    return '<div class="ct">' + head + recs.map((r) => {
+      const w = worker(r.workerId), st = opts.status ? opts.status(r) : attStatus(r);
+      const meta = '<div class="ct-meta">' + (opts.names ? '<b class="ct-name">' + esc(w ? w.name : "?") + "</b>" : "") + '<span class="ct-dur">' + durLine(r) + "</span> " + chip(st.label, st.cls) + "</div>";
+      return '<div class="ct-row' + (opts.names ? " named" : "") + '">' + meta + timeCell(r, "in", opts.photos) + timeCell(r, "out", opts.photos) + "</div>";
+    }).join("") + "</div>";
   }
 
   function recHistory(r) {
@@ -1233,24 +1291,40 @@
   /* ---------- History page (audit trail) ---------- */
   function viewHistory() {
     if (!(role() === "boss" || role() === "site")) return '<div class="card">' + empty("History is for management and site managers.") + "</div>";
-    const f = ui.auFilter || "all", q = (ui.auQ || "").toLowerCase();
+    const tab = ui.auTab || "times", q = (ui.auQ || "").toLowerCase();
+    const tabs = '<div class="tiles att-tabs">' + [["times", "Clock times"], ["actions", "All actions"]].map((x) => '<button class="tile' + (tab === x[0] ? " on" : "") + '" data-action="au-tab" data-t="' + x[0] + '"><span class="tile-label">' + x[1] + "</span></button>").join("") + "</div>";
+    const search = '<div class="search">' + icon("search") + '<input class="input" type="search" placeholder="Search a worker' + (tab === "actions" ? " or person" : "") + '" value="' + esc(ui.auQ || "") + '" data-input="auQ" aria-label="Search"></div>';
+    const head = backLink() + '<div class="page-head"><div><h1 class="page-title">History' + helpBtn("Clock times: every worker's clock in and clock out, with the worker's original time kept next to any time the site manager wrote. All actions: every button pressed by site managers and workers, with the reason. Nothing here can be edited or deleted, so workers are protected.") + "</h1></div>" +
+      (can.seePay() ? '<button class="btn btn-sm" data-action="au-csv">' + icon("download") + "Download</button>" : "") + "</div>" + tabs + search;
+    if (tab === "times") {
+      const from = addDays(today(), -30);
+      const recs = S.attendance.filter((a) => a.date >= from && (role() === "boss" || a.projectId === siteId()) && (!q || ((worker(a.workerId) || {}).name || "").toLowerCase().includes(q)))
+        .sort((a, b) => b.date.localeCompare(a.date) || (eff(b).in || "").localeCompare(eff(a).in || ""));
+      const days = {};
+      recs.slice(0, 400).forEach((a) => { (days[a.date] = days[a.date] || []).push(a); });
+      return head + (Object.keys(days).length ? Object.keys(days).sort().reverse().map((d) => '<div class="crew-head">' + (d === today() ? "Today" : fmtDayLong(d)) + '<span class="muted">' + days[d].length + "</span></div>" + '<div class="card ct-card">' + ctTable(days[d], { names: true }) + "</div>").join("") : '<div class="card">' + empty("No clock-ins found.") + "</div>");
+    }
+    const f = ui.auFilter || "all";
     const list = S.audit.filter((a) => (f === "all" || a.by === f) && (!q || ((worker(a.workerId) || {}).name || "").toLowerCase().includes(q) || (a.byName || "").toLowerCase().includes(q)));
     const chipB = (k, l) => '<button class="fchip ' + (f === k ? "on" : "") + '" data-action="au-filter" data-f="' + k + '">' + l + "</button>";
     const days = {};
     list.slice(0, 300).forEach((a) => { (days[a.date] = days[a.date] || []).push(a); });
-    return '<div class="page-head"><div><h1 class="page-title">History' + helpBtn("Every attendance action by site managers and workers: clock-ins, confirmations, approvals, changes, rejections, restores and undos, with the reason. Entries can never be edited or deleted, so workers are protected: any change to their pay is on record.") + "</h1></div>" +
-      (can.seePay() ? '<button class="btn btn-sm" data-action="au-csv">' + icon("download") + "Download</button>" : "") + "</div>" +
-      '<div class="search">' + icon("search") + '<input class="input" type="search" placeholder="Search a worker or person" value="' + esc(ui.auQ || "") + '" data-input="auQ" aria-label="Search history"></div>' +
-      '<div class="chips mt-12">' + chipB("all", "Everyone") + chipB("site", "Site manager") + chipB("worker", "Workers") + chipB("boss", "Management") + "</div>" +
+    return head + '<div class="chips mt-12">' + chipB("all", "Everyone") + chipB("site", "Site manager") + chipB("worker", "Workers") + chipB("boss", "Management") + "</div>" +
       (Object.keys(days).length ? Object.keys(days).sort().reverse().map((d) => '<div class="crew-head">' + (d === today() ? "Today" : fmtDayLong(d)) + '<span class="muted">' + days[d].length + '</span></div><div class="card alist au-list">' + days[d].map((a) => auditRow(a)).join("") + "</div>").join("") : '<div class="card">' + empty("Nothing recorded yet.") + "</div>");
   }
+  const backLink = (label, href) => href ? '<a class="back" href="' + href + '">' + icon("left") + esc(label) + "</a>" : '<button class="back" data-action="go-back">' + icon("left") + esc(label || "Back") + "</button>";
 
   /* ---------- Rejected bin ---------- */
   function viewBin() {
     if (!(role() === "boss" || role() === "site")) return '<div class="card">' + empty("Only for management and site managers.") + "</div>";
-    const list = S.attendance.filter((a) => a.status === "rejected" && (role() === "boss" || a.projectId === siteId())).sort((a, b) => b.date.localeCompare(a.date));
-    return '<div class="page-head"><div><h1 class="page-title">Rejected days' + helpBtn("Days the site manager rejected. They are not paid, but never deleted. Restore a day if it was rejected by mistake; it goes back to waiting for a check. Every reject and restore is in History.") + "</h1></div></div>" +
-      (list.length ? '<div class="card alist">' + list.map((r) => { const w = worker(r.workerId), e = eff(r); return '<div class="li">' + '<span class="arow-pic">' + img(e.inPhoto, "", w ? w.name : "") + '</span><div class="li-main"><div class="li-title">' + esc(w ? w.name : "?") + '</div><div class="li-sub">' + fmtDay(r.date) + ", " + esc(project(r.projectId) ? project(r.projectId).name : "") + (r.rejectReason ? ". “" + esc(r.rejectReason) + "”" : "") + "</div></div>" + (can.approve() ? '<button class="btn btn-sm btn-primary" data-action="att-restore" data-id="' + r.id + '">' + icon("undo") + "Restore</button>" : "") + "</div>"; }).join("") + "</div>" : '<div class="card">' + empty("No rejected days.") + "</div>");
+    const list = S.attendance.filter((a) => (a.status === "rejected" || partRejected(a)) && (role() === "boss" || a.projectId === siteId())).sort((a, b) => b.date.localeCompare(a.date));
+    const what = (r) => r.status === "rejected" ? "Whole day" : r.rejectIn && r.rejectOut ? "Clock in and clock out" : r.rejectIn ? "Clock in" : "Clock out";
+    const reason = (r) => r.status === "rejected" ? r.rejectReason : (r.rejectIn || r.rejectOut).reason;
+    const restore = (r) => !can.approve() ? "" : r.status === "rejected" ? '<button class="btn btn-sm btn-primary" data-action="att-restore" data-id="' + r.id + '" data-part="day">' + icon("undo") + "Restore</button>" :
+      (r.rejectIn ? '<button class="btn btn-sm btn-primary" data-action="att-restore" data-id="' + r.id + '" data-part="in">' + icon("undo") + "Restore in</button>" : "") + (r.rejectOut ? '<button class="btn btn-sm btn-primary" data-action="att-restore" data-id="' + r.id + '" data-part="out">' + icon("undo") + "Restore out</button>" : "");
+    return backLink("Check attendance", "#/attendance") +
+      '<div class="page-head"><div><h1 class="page-title">Rejected' + helpBtn("Clock-ins, clock-outs and whole days the site manager rejected. Nothing is deleted. Restore one if it was rejected by mistake. Every reject and restore is in History.") + "</h1></div></div>" +
+      (list.length ? '<div class="card alist">' + list.map((r) => { const w = worker(r.workerId), e = eff(r); return '<div class="li">' + '<span class="arow-pic">' + img(e.inPhoto, "", w ? w.name : "") + '</span><div class="li-main"><div class="li-title">' + esc(w ? w.name : "?") + ' <span class="chip bad">' + what(r) + '</span></div><div class="li-sub">' + fmtDay(r.date) + ", " + esc(project(r.projectId) ? project(r.projectId).name : "") + (reason(r) ? ". “" + esc(reason(r)) + "”" : "") + '</div></div><div class="row" style="gap:6px">' + restore(r) + "</div></div>"; }).join("") + "</div>" : '<div class="card">' + empty("Nothing rejected.") + "</div>");
   }
 
   // one short line listing other days that still need a look (waiting records and/or worker reports)
@@ -1273,7 +1347,7 @@
     const recs = S.attendance.filter((a) => a.projectId === sid && a.date === d).sort((a, b) => focus(a) - focus(b) || order(a) - order(b));
     const expected = expectedWorkers(sid, d);
     const missing = expected.filter((w) => !recs.some((r) => r.workerId === w.id));
-    const rejected = recs.filter((r) => r.status === "rejected");
+    const rejected = recs.filter((r) => r.status === "rejected" || partRejected(r));
     const live = recs.filter((r) => r.status !== "rejected");
     const todo = live.filter(isTodo);
     const easy = recs.filter((r) => r.status === "waiting" && isDone(r) && !matchOf(r).flag && !needsConfirm(r));
@@ -1370,8 +1444,7 @@
       (needsConfirm(r) ? '<div class="w-status wait">' + icon("clock") + tr("waitingConfirm") + "</div>" : '<div class="w-status">' + icon("check") + tr("confirmed") + (r.confirmedIn ? " " + esc(s.out && r.confirmedOut ? r.confirmedOut : r.confirmedIn) : "") + "</div>") + "</div>" : "";
     const mk = monthKey(t), m = workerMonth(w, mk);
     const hourly = w.dayRate / S.settings.normalHours * S.settings.otRate;
-    const dayRows = m.recs.length ? '<div class="list">' + m.recs.map((x) => { const h = calcHours(x); const f = h.final; return '<div class="li"><div class="li-main"><div class="li-title">' + fmtDay(x.date) + '</div><div class="li-sub">' + (f.half ? "½ " : "") + hrs(f.normal) + (f.ot ? " + " + hrs(f.ot) + " " + tr("ot") : "") + "</div></div>" +
-      (x.status === "approved" ? chip(tr("approved"), "good") : x.status === "rejected" ? chip(tr("rejected"), "bad") + (x.rejectReason ? '<span class="tiny muted" style="display:block">“' + esc(x.rejectReason) + "”</span>" : "") : chip(tr("waiting"), "warn")) + '<span class="li-amt num">' + (x.status === "rejected" ? "–" : RM(Math.round(payFor(x)))) + "</span></div>"; }).join("") + "</div>" : empty(tr("noDays"));
+    const dayRows = m.recs.length ? ctTable(m.recs, { inLabel: tr("clockIn"), outLabel: tr("clockOut"), status: (x) => x.status === "approved" ? { label: tr("approved") + (can.seePay() ? "" : ", " + RM(Math.round(payFor(x)))), cls: "good" } : x.status === "rejected" ? { label: tr("rejected") + (x.rejectReason ? ": " + x.rejectReason : ""), cls: "bad" } : { label: tr("waiting") + ", " + RM(Math.round(payFor(x))), cls: "warn" } }) : empty(tr("noDays"));
     return '<div class="w-wrap">' +
       '<div class="w-head"><div><h1 class="greet">' + tr("hi") + " " + esc(w.name.replace(/^(Md\.|Mohd)\s+/, "").split(" ")[0]) + '</h1><p class="page-sub">' + esc(site.name) + ", " + fmtDay(t) + ' <button class="link-btn small" data-action="w-notme">' + tr("notYou") + "</button></p></div>" + langPick() + "</div>" +
       big + confirmLine +
@@ -1388,7 +1461,7 @@
   /* ---------- Workers & crews ---------- */
   function viewTeam() {
     const t = today();
-    return '<div class="page-head"><div><h1 class="page-title">Workers &amp; crews</h1></div>' +
+    return backLink() + '<div class="page-head"><div><h1 class="page-title">Workers &amp; crews</h1></div>' +
       (can.manage() ? '<div class="row wrap"><button class="btn" data-action="new-crew">' + icon("plus") + 'New crew</button><button class="btn btn-primary" data-action="new-worker">' + icon("plus") + "Add worker</button></div>" : "") + "</div>" +
       S.crews.map((c) => {
         const ws = crewWorkers(c.id);
@@ -1405,7 +1478,7 @@
   function viewSettings() {
     const s = S.settings;
     const dis = can.manage() ? "" : " disabled";
-    return '<div class="page-head"><div><h1 class="page-title">Settings' + helpBtn(can.manage() ? "Rules used to work out hours, overtime and pay, and how long worker photos are kept." : "Only management can change these.") + "</h1></div></div>" +
+    return backLink() + '<div class="page-head"><div><h1 class="page-title">Settings' + helpBtn(can.manage() ? "Rules used to work out hours, overtime and pay, and how long worker photos are kept." : "Only management can change these.") + "</h1></div></div>" +
       '<div class="grid-2"><div class="card"><h2 class="card-title">Working hours</h2>' +
       '<label class="field"><span>Company name</span><input class="input" data-setting="company" value="' + esc(S.company.name) + '"' + dis + "></label>" +
       '<label class="field"><span>Normal hours in a full day</span><input class="input" type="number" step="0.5" min="1" data-setting="normalHours" value="' + s.normalHours + '"' + dis + "></label>" +
@@ -1414,10 +1487,13 @@
       '<label class="field"><span>Overtime pay rate <em>(1.5 = time and a half)</em></span><input class="input" type="number" step="0.25" min="1" data-setting="otRate" value="' + s.otRate + '"' + dis + "></label>" +
       '<label class="field"><span>Flag attendance when worker and site manager times differ by more than <em>(minutes)</em></span><input class="input" type="number" min="1" data-setting="matchMinutes" value="' + s.matchMinutes + '"' + dis + "></label>" +
       '<label class="field"><span>Pay day <em>(day of the next month)</em></span><input class="input" type="number" min="1" max="28" data-setting="payDay" value="' + s.payDay + '"' + dis + "></label>" +
+      '<label class="field"><span>Duration rounding <em>(default; the site manager can change it per day)</em></span><select class="input" data-setting="rounding"' + dis + ">" + Object.keys(ROUNDING).map((k) => '<option value="' + k + '"' + ((s.rounding || "exact") === k ? " selected" : "") + ">" + ROUNDING[k] + "</option>").join("") + "</select></label>" +
       '<p class="small muted mt-12">Example with these rules: in 08:00, out 19:00 = ' + hoursText(calcHours({ in: "08:00", out: "19:00" })) + ".</p></div>" +
       '<div class="stack"><div class="card"><h2 class="card-title">Worker photos and privacy</h2>' +
       '<label class="field"><span>Keep clock-in photos for this many days after the pay month ends</span><input class="input" type="number" min="1" data-setting="photoKeepDays" value="' + s.photoKeepDays + '"' + dis + "></label>" +
       '<p class="small muted mt-12">Photos are only used to confirm attendance and pay (PDPA). Example: a photo taken on 3 November is kept until ' + fmtDate(addDays("2026-11-30", s.photoKeepDays)) + ", then deleted automatically.</p></div>" +
+      '<div class="card"><h2 class="card-title">Saved reject reasons</h2><div class="list mt-8">' + (s.rejectReasons || []).map((x, i) => '<div class="li"><div class="li-main">' + esc(x) + "</div>" + (can.manage() || can.approve() ? '<button class="icon-btn sm" data-action="reason-del" data-i="' + i + '" aria-label="Remove reason">' + icon("trash") + "</button>" : "") + "</div>").join("") + "</div>" +
+        (can.manage() || can.approve() ? '<div class="row mt-12" style="gap:8px"><input class="input" data-input-reason placeholder="Add a reason"><button class="btn" data-action="reason-add">' + icon("plus") + "Add</button></div>" : "") + "</div>" +
       '<div class="card"><h2 class="card-title">Data on this device</h2><p class="small muted mt-8">This prototype saves everything in this browser only. Nothing is sent to a server.</p>' +
       '<div class="row wrap mt-16"><button class="btn btn-soft" data-action="reset-sample">' + icon("refresh") + 'Reload sample data</button><button class="btn btn-danger" data-action="wipe">' + icon("trash") + "Clear everything</button></div></div></div></div>";
   }
@@ -1446,12 +1522,22 @@
 
   const SHEETS = {
     reject(s) {
-      const r = S.attendance.find((a) => a.id === s.recId), w = worker(r.workerId);
-      return sheetHead("Reject this day?") +
-        '<p class="muted">' + esc(w.name) + ", " + fmtDayLong(r.date) + ". The day will not be paid. It goes to <b>Rejected</b>, where you can restore it. The worker sees the reason.</p>" +
-        '<div class="field"><span>Why</span>' + choiceRow("reason", ["Not on site", "Photo is not this worker", "Clocked in twice", "Left early without asking", "Other"], val("reason", "")) + "</div>" +
-        '<label class="field"><span>Details <em>(optional)</em></span><input class="input" data-f="note" value="' + esc(val("note", "")) + '"></label>' +
-        errBox() + '<div class="sheet-foot"><button class="btn btn-soft btn-big" data-action="close-sheet">Cancel</button><button class="btn btn-danger btn-big" data-action="reject-save">' + icon("x") + "Reject day</button></div>";
+      const r = S.attendance.find((a) => a.id === s.recId), w = worker(r.workerId), sf = r.self || {}, e = eff(r);
+      const part = val("part", "");
+      const tIn = sf.in || r.in || (r.orig || {}).in, tOut = sf.out || r.out || (r.orig || {}).out;
+      const parts = [["in", "Clock in" + (tIn ? " " + tIn : "")]].concat(tOut ? [["out", "Clock out " + tOut]] : []).concat([["day", "Whole day"]]);
+      const presets = S.settings.rejectReasons || [];
+      const reason = val("reason", "");
+      const explain = part === "in" ? "The clock-in time won't be used. Write your own clock-in time afterwards, otherwise the day stays in To do." :
+        part === "out" ? "The clock-out time won't be used. Write your own clock-out time afterwards, otherwise the day stays in To do." :
+        part === "day" ? "The whole day will not be paid. It goes to Rejected, where you can restore it." : "";
+      return sheetHead("Reject") + '<p class="muted">' + esc(w.name) + ", " + fmtDayLong(r.date) + ". The worker sees the reason. Nothing is deleted.</p>" +
+        '<div class="field"><span>What are you rejecting?</span><div class="choice-row">' + parts.map((x) => '<button type="button" class="choice ' + (part === x[0] ? "on" : "") + '" data-action="pick" data-k="part" data-v="' + x[0] + '">' + esc(x[1]) + "</button>").join("") + "</div>" + (explain ? '<div class="form-note">' + explain + "</div>" : "") + "</div>" +
+        '<div class="field"><span>Why</span><div class="choice-row">' + presets.map((x) => '<button type="button" class="choice ' + (reason === x ? "on" : "") + '" data-action="pick" data-k="reason" data-v="' + esc(x) + '">' + esc(x) + "</button>").join("") +
+        '<button type="button" class="choice ' + (reason === "__new" ? "on" : "") + '" data-action="pick" data-k="reason" data-v="__new">' + icon("plus", ' style="width:15px;height:15px;vertical-align:-2px"') + " Other reason</button></div></div>" +
+        (reason === "__new" ? '<label class="field"><span>Type the reason</span><input class="input" data-f="custom" value="' + esc(val("custom", "")) + '" placeholder="e.g. Clocked in from the car park" autofocus></label>' +
+          '<div class="field"><span>Save this reason for next time?</span>' + choiceRow("savePreset", ["Yes, save it", "No, just this once"], val("savePreset", "Yes, save it")) + "</div>" : "") +
+        errBox() + '<div class="sheet-foot"><button class="btn btn-soft btn-big" data-action="close-sheet">Cancel</button><button class="btn btn-danger btn-big" data-action="reject-save">' + icon("x") + "Reject</button></div>";
     },
     help(s) { return sheetHead("How this page works") + '<p class="help-text">' + esc(s.text) + "</p>"; },
     notes() {
@@ -1630,18 +1716,19 @@
       const r = s.recId ? S.attendance.find((a) => a.id === s.recId) : null;
       const w = worker(r ? r.workerId : s.workerId);
       const e0 = r ? eff(r) : {};
-      const inT = val("in", e0.in || "08:00"), outT = val("out", e0.out || "17:00");
-      const auto = calcHours({ in: inT, out: outT }).auto;
-      const cur = r && r.adjust ? r.adjust : null;
-      return sheetHead(r ? "Change attendance" : "Add by hand") +
+      const inT = val("in", (r && r.in) || e0.in || "08:00"), outT = val("out", (r && r.out) || e0.out || "17:00");
+      const round = val("round", (r && r.round) || S.settings.rounding || "exact");
+      const raw = workedHours(inT, outT);
+      const preview = calcHours({ in: inT, out: outT, round });
+      return sheetHead(r ? "Write site manager time" : "Add by hand") +
         '<p class="muted">' + esc(w.name) + ", " + fmtDayLong(r ? r.date : ui.attDate) + "</p>" +
-        '<div class="grid-2" style="gap:12px"><label class="field"><span>Time in</span><input class="input" type="time" data-f="in" data-rerender="1" value="' + esc(inT) + '"></label><label class="field"><span>Time out</span><input class="input" type="time" data-f="out" data-rerender="1" value="' + esc(outT) + '"></label></div>' +
-        '<div class="form-note">Automatic: ' + esc(hoursText({ final: auto })) + ".</div>" +
-        '<div class="grid-2" style="gap:12px"><label class="field"><span>Normal hours</span><input class="input" type="number" step="0.5" min="0" data-f="normal" value="' + esc(val("normal", cur ? cur.normal : auto.normal)) + '"></label><label class="field"><span>OT hours</span><input class="input" type="number" step="0.5" min="0" data-f="ot" value="' + esc(val("ot", cur ? cur.ot : auto.ot)) + '"></label></div>' +
-        '<div class="field"><span>Day</span>' + choiceRow("dayType", ["Full day", "Half day"], val("dayType", (cur ? cur.half : auto.half) ? "Half day" : "Full day")) + "</div>" +
-        '<label class="field"><span>Reason <em>(required, so the boss knows why)</em></span><input class="input" data-f="reason" value="' + esc(val("reason", cur ? cur.reason : r ? "" : "Forgot to clock in")) + '" placeholder="e.g. Forgot to clock out, left at 6pm"></label>' +
+        (r ? '<div class="field"><span>Original times <em>(these stay on record and cannot be changed)</em></span><div class="ct ct-solo"><div class="ct-row ct-head"><span>Clock in</span><span>Clock out</span></div><div class="ct-row">' + timeCell(r, "in") + timeCell(r, "out") + "</div></div></div>" : "") +
+        '<div class="grid-2" style="gap:12px"><label class="field"><span>Site manager clock in</span><input class="input" type="time" data-f="in" data-rerender="1" value="' + esc(inT) + '"></label><label class="field"><span>Site manager clock out</span><input class="input" type="time" data-f="out" data-rerender="1" value="' + esc(outT) + '"></label></div>' +
+        '<label class="field"><span>Duration</span><select class="input" data-f="round" data-rerender="1">' + Object.keys(ROUNDING).map((k) => '<option value="' + k + '"' + (round === k ? " selected" : "") + ">" + ROUNDING[k] + ": " + hrs(roundHours(raw, k)) + "</option>").join("") + "</select></label>" +
+        '<div class="form-note">Paid as: <b>' + esc(hoursText(preview)) + "</b>" + (raw !== preview.auto.worked ? " (exact " + hrs(raw) + ")" : "") + "</div>" +
+        '<label class="field"><span>Reason <em>(required if your time is different)</em></span><input class="input" data-f="reason" value="' + esc(val("reason", (r && r.mgrReason) || (r ? "" : "Forgot to clock in"))) + '" placeholder="e.g. Left at 6pm, forgot to clock out"></label>' +
         errBox() +
-        '<div class="sheet-foot">' + (cur ? '<button class="btn btn-soft btn-big" data-action="att-auto">Use automatic</button>' : "") + '<button class="btn btn-primary btn-big" data-action="att-edit-save">' + icon("check") + "Save and approve</button></div>";
+        '<div class="sheet-foot"><button class="btn btn-primary btn-big" data-action="att-edit-save">' + icon("check") + "Save and approve</button></div>";
     },
 
     need(s) {
@@ -1712,6 +1799,7 @@
   async function loadSample() {
     await PhotoDB.clear();
     S = window.SampleData.buildSampleData();
+    migrate();
     ui.open.clear();
     save(); purgeOldPhotos();
     location.hash = "#/today";
@@ -1774,10 +1862,10 @@
       let rid = null;
       if (s.action === "in") {
         rid = uid("at");
-        S.attendance.push({ id: rid, workerId: w.id, projectId: s.siteId, date: t, in: s.time, out: null, inPhoto: ref, outPhoto: null, status: "waiting", adjust: null, note: "" });
+        S.attendance.push({ id: rid, workerId: w.id, projectId: s.siteId, date: t, in: s.time, out: null, inPhoto: ref, outPhoto: null, orig: { in: s.time, out: null }, status: "waiting", adjust: null, note: "" });
       } else {
         const r = S.attendance.find((a) => a.workerId === w.id && a.date === t && a.projectId === s.siteId && a.in && !a.out);
-        if (r) { r.out = s.time; r.outPhoto = ref; rid = r.id; }
+        if (r) { r.out = s.time; r.outPhoto = ref; rid = r.id; r.orig = r.orig || {}; if (!r.orig.out) r.orig.out = s.time; }
       }
       const e = log(s.action === "in" ? "photo-in" : "photo-out", { workerId: w.id, recId: rid, projectId: s.siteId, forDate: t, value: s.time });
       s.step = "list"; s.q = ""; s.photo = null;
@@ -1796,6 +1884,10 @@
       if (location.hash === "#/attendance") render(); else location.hash = "#/attendance";
     },
     help(el) { openSheet({ type: "help", text: el.dataset.t }); },
+    "au-tab"(el) { ui.auTab = el.dataset.t; render(); },
+    "go-back"() { if (history.length > 1) history.back(); else location.hash = "#/today"; },
+    "reason-del"(el) { S.settings.rejectReasons.splice(+el.dataset.i, 1); save(); render(); toast("Reason removed."); },
+    "reason-add"() { const inp = $('[data-input-reason]'); const v = inp && inp.value.trim(); if (!v) return; if (S.settings.rejectReasons.indexOf(v) < 0) S.settings.rejectReasons.push(v); save(); render(); toast("Reason saved."); },
     "au-filter"(el) { ui.auFilter = el.dataset.f; render(); },
     "au-csv"() {
       const q = (v) => '"' + String(v == null ? "" : v).replace(/"/g, '""') + '"';
@@ -1843,20 +1935,35 @@
     },
     "att-restore"(el) {
       const r = S.attendance.find((a) => a.id === el.dataset.id); if (!r) return;
-      const snap = snapshot(); r.status = "waiting"; r.restoredAt = new Date().toISOString();
+      const snap = snapshot(), part = el.dataset.part || "day";
+      if (part === "day") r.status = "waiting"; else delete r[part === "in" ? "rejectIn" : "rejectOut"];
+      r.restoredAt = new Date().toISOString();
       notify({ type: "restored", to: "worker", workerId: r.workerId, projectId: r.projectId, forDate: r.date });
-      done(esc(worker(r.workerId).name) + "'s day restored. It is waiting for a check again.", snap, [log("restore", { workerId: r.workerId, recId: r.id, projectId: r.projectId, forDate: r.date })]);
+      const what = part === "day" ? "day" : part === "in" ? "clock in" : "clock out";
+      done(esc(worker(r.workerId).name) + "'s " + what + " restored. Waiting for a check again.", snap, [log("restore", { workerId: r.workerId, recId: r.id, projectId: r.projectId, forDate: r.date, part })]);
     },
     "reject-save"() {
       const f = F(), r = S.attendance.find((a) => a.id === ui.sheet.recId); if (!r) return;
-      if (!f.reason) return fail("Pick a reason. The worker will see it.");
-      const reason = f.reason + ((f.note || "").trim() ? ", " + f.note.trim() : "");
-      const snap = snapshot();
-      r.status = "rejected"; r.rejectReason = reason; r.rejectedAt = new Date().toISOString();
-      notify({ type: "rejected", to: "worker", workerId: r.workerId, projectId: r.projectId, forDate: r.date, text: reason });
-      const e = log("reject", { workerId: r.workerId, recId: r.id, projectId: r.projectId, forDate: r.date, reason });
+      if (!f.part) return fail("Choose what you are rejecting: clock in, clock out or the whole day.");
+      let reason = f.reason === "__new" ? (f.custom || "").trim() : f.reason;
+      if (!reason) return fail(f.reason === "__new" ? "Type the reason." : "Pick a reason. The worker will see it.");
+      if (f.reason === "__new" && (f.savePreset || "Yes, save it").indexOf("Yes") === 0 && S.settings.rejectReasons.indexOf(reason) < 0) S.settings.rejectReasons.push(reason);
+      const snap = snapshot(), sf = r.self || {}, og = r.orig || {}, at = new Date().toISOString();
+      let value = "", msg;
+      if (f.part === "day") { r.status = "rejected"; r.rejectReason = reason; r.rejectedAt = at; msg = esc(worker(r.workerId).name) + "'s whole day moved to Rejected."; }
+      else {
+        const side = f.part, key = side === "in" ? "rejectIn" : "rejectOut";
+        value = sf[side] || r[side] || og[side] || "";
+        r[key] = { reason, at, time: value };
+        // the rejected time stops counting; any time copied from it is cleared so the site manager writes their own
+        if (r[side] && (r[side] === sf[side] || r[side] === og[side])) r[side] = null;
+        if (r.status === "approved") r.status = "waiting";
+        msg = esc(worker(r.workerId).name) + "'s " + (side === "in" ? "clock in" : "clock out") + " rejected. Write your own time with “Write my time”.";
+      }
+      notify({ type: "rejected", to: "worker", workerId: r.workerId, projectId: r.projectId, forDate: r.date, text: (f.part === "day" ? "" : (f.part === "in" ? "Clock in " : "Clock out ") + value + ": ") + reason });
+      const e = log("reject", { workerId: r.workerId, recId: r.id, projectId: r.projectId, forDate: r.date, reason, part: f.part, value });
       closeSheet();
-      done(esc(worker(r.workerId).name) + "'s day moved to Rejected. Not paid unless restored.", snap, [e], "x");
+      done(msg, snap, [e], "x");
     },
     "att-open-day"(el) { closeSheet(); ui.attSite = el.dataset.site; ui.attDate = el.dataset.d; ui.attPicked = true; if (location.hash === "#/attendance") render(); else location.hash = "#/attendance"; },
 
@@ -2096,35 +2203,30 @@
       const s = ui.sheet, f = F();
       let r = s.recId ? S.attendance.find((a) => a.id === s.recId) : null;
       const e0 = r ? eff(r) : {};
-      const inT = f.in || e0.in || "08:00", outT = f.out || e0.out || "17:00";
-      if (!inT || !outT) return fail("Fill in both times.");
-      const auto = calcHours({ in: inT, out: outT }).auto;
-      const reason = (f.reason != null ? f.reason : (r && r.adjust ? r.adjust.reason : r ? "" : "Forgot to clock in")).trim();
-      const normal = f.normal != null ? +f.normal : (r && r.adjust ? r.adjust.normal : auto.normal);
-      const ot = f.ot != null ? +f.ot : (r && r.adjust ? r.adjust.ot : auto.ot);
-      const half = f.dayType ? f.dayType === "Half day" : (r && r.adjust ? r.adjust.half : auto.half);
-      const changedTimes = !r || inT !== e0.in || outT !== e0.out;
-      const changedHours = normal !== auto.normal || ot !== auto.ot || half !== auto.half;
-      if ((changedTimes || changedHours) && !reason) return fail("Write a short reason for the change.");
+      const inT = f.in || (r && r.in) || e0.in || "08:00", outT = f.out || (r && r.out) || e0.out || "17:00";
+      const round = f.round || (r && r.round) || S.settings.rounding || "exact";
+      const reason = (f.reason != null ? f.reason : (r && r.mgrReason) || (r ? "" : "Forgot to clock in")).trim();
+      const changed = !r || inT !== e0.in || outT !== e0.out;
+      if (changed && !reason) return fail("Write a short reason. The worker can see it.");
       const snap = snapshot(), isNew = !r;
-      const before = r ? calcHours(r) : null;
       if (!r) {
-        r = { id: uid("at"), workerId: s.workerId, projectId: ui.attSite, date: ui.attDate, in: inT, out: outT, inPhoto: null, outPhoto: null, status: "approved", adjust: null, note: "Added by hand: " + reason };
+        r = { id: uid("at"), workerId: s.workerId, projectId: ui.attSite, date: ui.attDate, in: null, out: null, inPhoto: null, outPhoto: null, orig: null, status: "waiting", adjust: null, note: "Added by hand" };
         S.attendance.push(r);
       }
-      r.in = inT; r.out = outT; r.status = "approved";
-      r.adjust = changedHours || changedTimes ? { normal, ot, half, by: "site", reason } : r.adjust;
-      if (r.adjust && !changedHours && !changedTimes && reason) r.adjust.reason = reason;
-      // describe exactly what changed, for the history
-      const after = calcHours(r), parts = [];
-      if (!isNew) {
-        if (inT !== e0.in) parts.push("in " + (e0.in || "–") + " → " + inT);
-        if (outT !== e0.out) parts.push("out " + (e0.out || "–") + " → " + outT);
-        if (before && !before.open && before.final.normal !== after.final.normal) parts.push("normal " + hrs(before.final.normal) + " → " + hrs(after.final.normal));
-        if (before && !before.open && before.final.ot !== after.final.ot) parts.push("OT " + hrs(before.final.ot) + " → " + hrs(after.final.ot));
-        if (before && !before.open && before.final.half !== after.final.half) parts.push(after.final.half ? "made a half day" : "made a full day");
+      const sf = r.self || {};
+      r.in = inT; r.out = outT; r.round = round; r.status = "approved";
+      if (reason) r.mgrReason = reason;
+      if (r.adjust && r.adjust.normal != null) r.adjust = null; // times now decide the hours
+      const after = calcHours(r);
+      const parts = [];
+      if (isNew) parts.push(inT + "–" + outT);
+      else {
+        if (inT !== e0.in) parts.push("clock in " + inT + (sf.in ? " (worker's own " + sf.in + " kept)" : e0.in ? " (was " + e0.in + ")" : ""));
+        if (outT !== e0.out) parts.push("clock out " + outT + (sf.out ? " (worker's own " + sf.out + " kept)" : e0.out ? " (was " + e0.out + ")" : ""));
       }
-      const e = log(isNew ? "add" : "change", { workerId: r.workerId, recId: r.id, projectId: r.projectId, forDate: r.date, value: isNew ? inT + "–" + outT + ", " + hoursText(after) : (parts.join(", ") || "approved, no changes"), reason });
+      if (round !== "exact") parts.push(ROUNDING[round].toLowerCase());
+      parts.push("paid " + hoursText(after));
+      const e = log(isNew ? "add" : "change", { workerId: r.workerId, recId: r.id, projectId: r.projectId, forDate: r.date, value: parts.join(", "), reason });
       notify({ type: "changed", to: "worker", workerId: r.workerId, projectId: r.projectId, forDate: r.date, text: e.value + (reason ? " (" + reason + ")" : "") });
       closeSheet();
       done("Saved and approved: " + esc(worker(r.workerId).name) + ", " + hoursText(after) + ".", snap, [e]);
@@ -2197,6 +2299,7 @@
     if (el.dataset.setting) {
       const k = el.dataset.setting;
       if (k === "company") S.company.name = el.value.trim() || S.company.name;
+      else if (k === "rounding") S.settings.rounding = el.value;
       else { const v = parseFloat(el.value); if (!isNaN(v) && v >= 0) S.settings[k] = v; }
       save(); render(); toast("Saved.");
     }
@@ -2226,7 +2329,7 @@
      ====================================================================== */
   load();
   const firstVisit = !S;
-  if (firstVisit) { S = window.SampleData.buildSampleData(); save(); }
+  if (firstVisit) { S = window.SampleData.buildSampleData(); migrate(); save(); }
   purgeOldPhotos();
   enterRoute();
   render();

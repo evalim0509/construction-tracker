@@ -183,7 +183,7 @@ one are clocked in by the site manager with a photo, as before.
 ## 7. How it works (technical)
 
 - **No build step.** `index.html` loads `styles.css`, `three.min.js` (3D library, MIT, bundled locally), `factory3d.js`, `sample-data.js` and `app.js`.
-- **Updates reach phones straight away:** `index.html` links every file with a version number (`app.js?v=0.5.0`). Bump it on each release so browsers don't keep showing an old cached copy (GitHub Pages lets browsers cache files for 10 minutes).
+- **Updates reach phones straight away:** `index.html` links every file with a version number (`app.js?v=0.5.1`). Bump it on each release so browsers don't keep showing an old cached copy (GitHub Pages lets browsers cache files for 10 minutes).
 - **Data:** everything except photos is one JSON object in `localStorage` (`sitebook-data-v1`). Photos are compressed to ~720px JPEG and kept in **IndexedDB** (`sitebook-photos`).
 - **Screens** are functions returning HTML; clicks are handled in one place through `data-action` attributes.
 - **3D buildings** (`factory3d.js`): each project gets its own randomly generated factory (sawtooth roof, silos) or warehouse (gable roof, loading docks), seeded by the project id. The model shows progress: steel frame → walls going up (teal) → finished, with a tower crane until 92%. One shared WebGL view plus one for still thumbnails. Falls back to a line drawing if WebGL is not available.
@@ -197,7 +197,10 @@ workers      id, name, crewId, dayRate, phone, hasPhone, lang
 assignments  id, crewId, projectId, from, to          (crew bookings; overlap is blocked)
 attendance   id, workerId, projectId, date,
              in, out, inPhoto, outPhoto            (site manager's side; wins for pay)
-             self{in, out, inPhoto, outPhoto, inLoc} (worker's own phone; second count)
+             self{in, out, inPhoto, outPhoto, inLoc} (worker's own phone; NEVER changed by anyone)
+             orig{in, out}                         (site manager's original photo times; never changed)
+             rejectIn / rejectOut {reason, at, time} (one side rejected), rejectReason (whole day)
+             round(exact|30|60), mgrReason          (site manager's written time and why)
              status(waiting|approved|rejected), adjust{normal,ot,half,reason}
 disputes     id, workerId, date, projectId, reason, note, status(open|sorted)
 notifications id, type(selfie-in|selfie-out|report|confirmed|rejected|restored|changed), to(site|worker), workerId, projectId, photo, date, time, read
@@ -212,8 +215,9 @@ settings     normalHours, breakHours, breakAfter, halfDayUnder, otRate, photoKee
 ### Hours rule
 ```
 worked = out − in − (lunch break if worked > 5h)
+worked is then rounded as chosen: exact / nearest 30 min / nearest hour (default in Settings, per day in "Write my time")
 normal = min(worked, 8)
-OT     = worked − 8, rounded down to the half hour
+OT     = worked − 8
 half day if worked < 5h
 pay    = day rate (or half) + OT × (day rate ÷ 8) × 1.5
 ```
@@ -244,6 +248,20 @@ Site manager only worker has no phone                             → neutral, n
 11. **e-Invoicing (LHDN MyInvois)** is being phased in. Accountants will ask for supplier TIN and e-invoice numbers. Plan fields for it before production.
 
 ## 9. Change log
+
+### v0.5.1 — 20 Nov 2026 — clock-in tables, original times protected, rounding, saved reasons
+Client feedback: "history in table form, 2 columns, clock in and clock out, time big, date small; no back button on rejected days; how do I know if I reject the clock in or the clock out; the site manager must not overwrite the worker's original time, only write another time; duration auto calculated with exact / nearest 30 min / nearest hour; let the manager save reject reasons for next time".
+- **Clock in | Clock out tables** with the time in big type and the date small underneath. Used in:
+  - **History → Clock times** (new default tab; the action log is now **All actions**), grouped by day, with the worker's name, duration and status
+  - every worker row on Check attendance (with the photos)
+  - the worker's own **My days**
+- **The worker's original time is never overwritten.** "Change" is now **Write my time**. The site manager writes a separate clock in/out; the worker's selfie time (and the site manager's original photo time) stay visible ("Worker 07:05, site manager wrote 07:46") and are listed as "Original times" in the form.
+- **Duration calculated automatically**, with a dropdown showing all three results: **Exact: 8h 34m**, **Nearest 30 min: 8h 30m**, **Nearest hour: 9h**. The default is set in Settings. Durations now show as "8h 34m" instead of decimals, and OT is no longer rounded down to the half hour unless a rounding option is chosen.
+- **Reject clock in, clock out, or the whole day.** The form asks which one, shows the times on the buttons ("Clock in 07:05", "Clock out 17:19"), and explains what happens. A rejected time is crossed out in red with the reason. After rejecting one side, the day stays in To do until the site manager writes their own time. Restore works per side ("Restore clock out").
+- **Saved reject reasons:** "+ Other reason", type it, "Save this reason for next time" (on by default). Saved reasons appear as buttons. Settings → **Saved reject reasons** lets you add or remove them.
+- **Back buttons** on Rejected (back to Check attendance), History, Workers & crews and Settings.
+- The Rejected page lists rejected clock-ins and clock-outs as well as whole days, labelled "Clock in", "Clock out" or "Whole day".
+- History entries say exactly what happened, e.g. "rejected Mohd Hafiz's clock out 17:19. Reason: Clocked out from home" and "wrote site manager time … clock out 17:20 (worker's own 17:19 kept), nearest 30 min, paid 8h normal + 30m OT".
 
 ### v0.5.0 — 20 Nov 2026 — history (audit trail), undo, Rejected bin
 Client request: "audit trail of what the site manager and construction workers did, an undo button, and a trash place for rejected workers in case the manager pressed it by accident; the audit trail is to protect the workers".
