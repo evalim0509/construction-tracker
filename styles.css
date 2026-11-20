@@ -647,6 +647,8 @@ button.chip:hover { text-decoration: underline; text-underline-offset: 3px; }
 .att-f.on span { color: #C9D2D9; }
 .att-f.on b.warn { color: #F2B36B; }
 .att-card.focus { box-shadow: 0 0 0 2px var(--blue); }
+.att-wages { margin: -6px 2px 16px; text-align: right; }
+.att-wages b { font-weight: 600; margin-left: 4px; }
 .w-today { margin-top: 12px; }
 .w-today-head { font-weight: 600; margin-bottom: 10px; }
 .w-today .w-status { margin-top: 12px; }
@@ -722,6 +724,20 @@ button.chip:hover { text-decoration: underline; text-underline-offset: 3px; }
   .cal-month { min-width: 0; font-size: 18px; }
   .day-panel { margin-top: 0; }
   .mobile-only { display: flex !important; }
+  /* attendance filters: one swipeable row of compact buttons */
+  .att-sum { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; gap: 8px; padding: 2px 16px 4px; margin: 0 -16px 14px; background: none; box-shadow: none; border-radius: 0; }
+  .att-sum::-webkit-scrollbar { display: none; }
+  .att-f { flex: none; flex-direction: row-reverse; align-items: center; gap: 7px; margin: 0; padding: 9px 13px; border-radius: 6px; background: var(--page); box-shadow: inset 0 0 0 1px var(--line); white-space: nowrap; }
+  .att-sum .att-f b { font-size: 15px; font-weight: 600; margin: 0; }
+  .att-sum .att-f span { font-size: 14.5px; color: var(--ink-2); }
+  .att-sum .att-f span { display: inline-block; }
+  .att-sum .att-f span::first-letter { text-transform: uppercase; }
+  .wait-days { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin: 0 -16px 14px; padding: 0 16px; white-space: nowrap; }
+  .wait-days::-webkit-scrollbar { display: none; }
+  .att-f.on { background: var(--ink); box-shadow: none; }
+  .att-f.on span { color: #fff; }
+  .att-wages { text-align: left; margin-top: -4px; }
+
   .banner { flex-wrap: wrap; }
   .banner .btn { width: 100%; }
   .icon-btn { width: 40px; height: 40px; }

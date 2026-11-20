@@ -1140,6 +1140,15 @@
       "</div>";
   }
 
+  // one short line listing other days that still need a look (waiting records and/or worker reports)
+  function otherDaysLine(sid, d, reports) {
+    const m = {};
+    waitingDays(sid).forEach((x) => { if (x.d !== d) (m[x.d] = m[x.d] || { n: 0, r: 0 }).n = x.n; });
+    reports.forEach((x) => { (m[x.date] = m[x.date] || { n: 0, r: 0 }).r++; });
+    const days = Object.keys(m).sort().reverse();
+    if (!days.length) return "";
+    return '<div class="wait-days small"><span class="muted">Other days:</span>' + days.map((k) => '<button class="chip warn" data-action="att-goto" data-d="' + k + '">' + fmtDay(k) + (m[k].n ? ", " + m[k].n + " waiting" : "") + (m[k].r ? (m[k].n ? " + report" : ", report") : "") + "</button>").join("") + "</div>";
+  }
   function viewAttendance() {
     const sid = ui.attSite || defaultAttSite();
     ui.attSite = sid;
@@ -1168,7 +1177,7 @@
     };
     const fk = F_[ui.attFilter] ? ui.attFilter : "all";
     const filterBar = '<div class="card att-sum">' + Object.keys(F_).map((k) => '<button class="att-f' + (fk === k ? " on" : "") + '" data-action="att-filter" data-f="' + k + '"><b class="num' + (F_[k].warn && F_[k].list.length ? " warn" : "") + '">' + F_[k].list.length + "</b><span>" + F_[k].label + "</span></button>").join("") +
-      (can.seePay() ? '<div class="grow" style="text-align:right"><span class="muted">Wages for the day</span> <b class="num" style="font-weight:500;font-size:18px">' + RM(Math.round(sum(recs.filter((r) => r.status === "approved"), payFor))) + "</b></div>" : "") + "</div>";
+      "</div>" + (can.seePay() ? '<p class="att-wages small"><span class="muted">Wages for the day (approved)</span> <b class="num">' + RM(Math.round(sum(recs.filter((r) => r.status === "approved"), payFor))) + "</b></p>" : "");
     const missingRow = (w) => { const dsp = openDispute(w.id, d); return '<div class="li">' + avatar(w) + '<div class="li-main"><div class="li-title">' + esc(w.name) + '</div><div class="li-sub">' + esc(crew(w.crewId) ? crew(w.crewId).name : "") + (dsp ? ', <span style="color:#7A4E18">reported: ' + esc(dsp.reason) + (dsp.note ? ", “" + esc(dsp.note) + "”" : "") + "</span>" : "") + "</div></div>" + (can.approve() ? '<button class="btn btn-sm btn-soft" data-action="att-add" data-w="' + w.id + '">Add by hand</button>' : "") + "</div>"; };
     const filtered = fk === "all" ? null : fk === "missing" ? (missing.length ? '<div class="card"><div class="list">' + missing.map(missingRow).join("") + "</div></div>" : "") : (F_[fk].list.length ? '<div class="att-grid">' + F_[fk].list.map(attCard).join("") + "</div>" : "");
 
@@ -1188,8 +1197,7 @@
     return '<div class="page-head"><div><h1 class="page-title">Check attendance</h1><p class="page-sub">' + (can.approve() ? "Green means the worker and you agree. Amber needs a look. Hours are worked out automatically, but you have the final say." : "Only the site manager can approve or change attendance. You can see everything here.") + "</p></div>" +
       (can.approve() && easy.length ? '<button class="btn btn-primary" data-action="att-all">' + icon("check") + "Approve " + easy.length + " matched</button>" : "") + "</div>" +
       '<div class="row-between wrap" style="margin-bottom:16px">' + nav + sitePick + "</div>" +
-      (waitingDays(sid).filter((x) => x.d !== d).length ? '<div class="wait-days small"><span class="muted">Also waiting for a check:</span>' + waitingDays(sid).filter((x) => x.d !== d).map((x) => '<button class="chip warn" data-action="att-goto" data-d="' + x.d + '">' + fmtDay(x.d) + " (" + x.n + ")</button>").join("") + "</div>" : "") +
-      (otherReports.length ? '<div class="wait-days small"><span class="muted">Worker reports on other days:</span>' + otherReports.map((x) => '<button class="chip warn" data-action="att-goto" data-d="' + x.date + '">' + icon("flag") + fmtDay(x.date) + "</button>").join("") + "</div>" : "") +
+      otherDaysLine(sid, d, otherReports) +
       (p ? filterBar : "") +
       (filtered !== null ? (filtered || '<div class="card">' + empty("Nobody here right now. Tap “clocked in” to see everyone.") + "</div>") :
         (groups || '<div class="card">' + empty(isSunday(d) ? "Sunday. Rest day." : "Nobody clocked in at this site on this day.") + "</div>"));

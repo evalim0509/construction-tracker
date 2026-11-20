@@ -242,6 +242,12 @@ Site manager only worker has no phone                             → neutral, n
 
 ## 9. Change log
 
+### v0.4.2 — 20 Nov 2026 — tidier attendance filters on phones
+Client feedback: "this part of the UI on mobile looks cluttered".
+- On phones, the attendance numbers (Clocked in, Took a selfie, Waiting for you, To look at, Did not clock in) are now one row of compact filter buttons you can swipe sideways, label first, then the number. On laptops they stay as one row of numbers.
+- "Wages for the day" moved to its own small line under the filters.
+- "Also waiting for a check" and "Worker reports on other days" are merged into one line, "Other days: Thu 19 Nov, 19 waiting + report", which also swipes sideways on phones.
+
 ### v0.4.1 — 20 Nov 2026 — worker selfies show up straight away, notifications
 Client feedback: "after I take the selfie to clock in it doesn't appear anywhere; only after clock out does it appear for the site manager. I want the clock-in selfie to show for both the worker and the site manager, with a notification, and a filter to see who took a selfie."
 - **Bug fixed:** Check attendance used to open on the latest day with *finished* records (usually yesterday), so a worker who had only clocked in was not visible. It now opens on **today** whenever anyone clocked in today.
