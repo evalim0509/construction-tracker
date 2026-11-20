@@ -105,6 +105,7 @@
     chart: '<path d="M3 3v18h18"/><path d="M18 17V9M13 17V5M8 17v-3"/>',
     flag: '<path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1zM4 22v-7"/>',
     qr: '<rect width="5" height="5" x="3" y="3" rx="1"/><rect width="5" height="5" x="16" y="3" rx="1"/><rect width="5" height="5" x="3" y="16" rx="1"/><path d="M21 16h-3a2 2 0 0 0-2 2v3M21 21v.01M12 7v3a2 2 0 0 1-2 2H7M3 12h.01M12 3h.01M12 16v.01M16 12h1M21 12v.01M12 21v-1"/>',
+    phoneoff: '<rect x="5" y="2" width="14" height="20" rx="2"/><path d="M12 18h.01M3 3l18 18"/>',
     bell: '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.94 1.94 0 0 0 3.4 0"/>',
     globe: '<circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20M2 12h20"/>',
     logo: '<path d="M5 20V11l5 3.4V11l5 3.4V6h4v14z" fill="#fff" stroke="none"/>'
@@ -521,6 +522,7 @@
       '<span class="tile-ic">' + icon(x.icon) + '</span><span class="tile-n num">' + (x.count == null ? "" : x.count) + '</span><span class="tile-label">' + x.label + "</span></button>").join("") + "</div>" +
       (it ? '<div class="tile-panel card"><div class="card-head"><h2 class="card-title">' + (it.title || it.label) + '</h2><button class="icon-btn sm" data-action="tile" data-g="' + group + '" data-t="' + it.id + '" aria-label="Close">' + icon("x") + "</button></div>" + it.body() + "</div>" : "");
   }
+  const helpBtn = (text) => '<button class="help-btn" data-action="help" data-t="' + esc(text) + '" aria-label="What is this page?">?</button>';
   const chip = (label, cls, ic) => '<span class="chip ' + (cls || "") + '">' + (ic ? icon(ic) : "") + esc(label) + "</span>";
   const pbar = (v, cls) => '<div class="bar ' + (cls || "") + '"><span style="width:' + Math.round(v * 100) + '%"></span></div>';
   const empty = (text, btn) => '<div class="empty">' + text + (btn || "") + "</div>";
@@ -597,7 +599,7 @@
     const inSum = sum(expIn, (m) => m.amount), outList = billsDue(30), outSum = sum(outList, (m) => m.amount);
     const maxV = Math.max(inSum, outSum, 1);
 
-    return '<div class="page-head"><div><p class="greet-small">' + greeting() + ", " + esc(S.people.boss.name) + '</p><h1 class="page-title">Today, ' + fmtDayLong(t).replace(",", "") + '</h1><p class="page-sub">Every site at a glance.</p></div></div>' +
+    return '<div class="page-head"><div><p class="greet-small">' + greeting() + ", " + esc(S.people.boss.name) + '</p><h1 class="page-title">Today, ' + fmtDayLong(t).replace(",", "") + '</h1></div></div>' +
       '<div class="stats">' +
       '<a class="stat" href="#/money"><div class="stat-label">Spent this month' + icon("arrow") + '</div><div class="stat-value num"><span class="unit">RM</span>' + Math.round(spent).toLocaleString("en-MY") + '</div><div class="stat-foot">' + plural(receiptsCount, "receipt") + " in " + MON_LONG[+mk.slice(5) - 1] + "</div></a>" +
       '<a class="stat" href="#/money"><div class="stat-label">Money expected in' + icon("arrow") + '</div><div class="stat-value num"><span class="unit">RM</span>' + Math.round(inSum).toLocaleString("en-MY") + '</div><div class="stat-foot">' + plural(expIn.length, "client payment") + " in the next 30 days</div></a>" +
@@ -608,10 +610,10 @@
       '<div class="stack">' +
       '<div class="card"><div class="card-head"><h2 class="card-title">Needs your attention</h2>' + chip(String(attn.length), attn.length ? "warn" : "good") + "</div>" +
       (attn.length ? attn.slice(0, 5).map((a) => '<a class="attn" href="' + a.href + '"><span class="attn-tag ' + a.cls + '">' + a.tag + '</span><span class="grow small">' + a.text + "</span></a>").join("") : empty("Nothing needs you right now.")) + "</div>" +
-      '<div class="dark-card"><div class="row-between"><div><div class="muted small">Next 30 days</div><div style="font-size:30px;font-weight:500;letter-spacing:-.02em" class="num">' + (inSum - outSum >= 0 ? "+" : "−") + RMshort(inSum - outSum).replace("RM ", "RM ") + '</div></div><div class="muted tiny" style="text-align:right">money in<br>minus bills</div></div>' +
+      '<div class="dark-card"><div class="row-between"><div><div class="muted small">Next 30 days</div><div style="font-size:30px;font-weight:500;letter-spacing:-.02em" class="num">' + (inSum - outSum >= 0 ? "+" : "−") + RMshort(inSum - outSum).replace("RM ", "RM ") + '</div></div></div>' +
       '<div class="flow-row"><span class="muted">Coming in</span><div class="flow-bars"><span style="width:' + (inSum / maxV) * 100 + '%;background:#8DB8B3"></span></div><span class="num">' + RMshort(inSum) + "</span></div>" +
       '<div class="flow-row"><span class="muted">Bills to pay</span><div class="flow-bars"><span style="width:' + (outSum / maxV) * 100 + '%;background:#A3B4CF"></span></div><span class="num">' + RMshort(outSum) + "</span></div>" +
-      '<div class="muted tiny mt-8">Wages are not included yet.</div></div>' +
+      '</div>' +
       "</div></div>" +
       (!S.projects.length ? "" : '<div class="section"><h2 class="section-title">Projects <a class="link-btn small" href="#/projects">See all</a></h2><div class="card"><div class="list">' +
       S.projects.map((p) => {
@@ -722,7 +724,7 @@
     else right = '<button class="btn btn-sm btn-blue" data-action="need-status" data-id="' + n.id + '" data-to="arrived">Mark arrived</button>';
     const fromYard = n.status !== "arrived" && m.qty >= n.qty && can.buy() ? ' <button class="link-btn small" data-action="need-yard" data-id="' + n.id + '">Send from yard instead</button>' : "";
     return '<div class="li need-row"><div class="li-main"><div class="li-title">' + n.qty.toLocaleString("en-MY") + " " + esc(m.unit) + " " + esc(m.name) + "</div>" +
-      '<div class="li-sub">' + (n.status === "ordered" ? '<span style="color:var(--blue)">Ordered</span>, ' : "") + esc(p ? p.name : "For the yard") + ", " + when + (n.note ? ". " + esc(n.note) : "") + fromYard + "</div></div>" + right + "</div>";
+      '<div class="li-sub">' + (n.status === "ordered" ? '<span style="color:var(--blue)">Ordered</span>, ' : "") + esc(p ? p.name : "For the yard") + ", " + when + fromYard + "</div></div>" + right + "</div>";
   }
 
   function phasesHTML(p) {
@@ -793,7 +795,7 @@
 
     const filter = '<select class="input pill-select" data-change="calProject" aria-label="Show one project">' +
       '<option value="">All projects</option>' + S.projects.map((p) => '<option value="' + p.id + '"' + (ui.calProject === p.id ? " selected" : "") + ">" + esc(p.name) + "</option>").join("") + "</select>";
-    return '<div class="page-head"><div><h1 class="page-title">Calendar</h1><p class="page-sub">' + (ui.calProject ? "Days with a crew at " + esc(project(ui.calProject).name) + " are shaded." : "How many crews are free each day. Tap a day to see who goes where.") + "</p></div>" +
+    return '<div class="page-head"><div><h1 class="page-title">Calendar' + helpBtn("Each day shows how many crews are free. Pick one project at the top to shade the days its crews work there. Tap a day to see which crew goes where.") + "</h1></div>" +
       (can.manage() || role() === "site" ? '<button class="btn btn-primary" data-action="open-assign">' + icon("users") + "Book a crew</button>" : "") + "</div>" +
       '<div class="row-between wrap" style="margin-bottom:16px">' + filter +
       '<div class="cal-head desktop-only"><button class="icon-btn" data-action="cal-month" data-step="-1" aria-label="Previous month">' + icon("left") + '</button><div class="cal-month">' + MON_LONG[m - 1] + " " + y + '</div><button class="icon-btn" data-action="cal-month" data-step="1" aria-label="Next month">' + icon("right") + "</button>" +
@@ -830,7 +832,7 @@
 
   /* ---------- Projects ---------- */
   function viewProjects() {
-    const head = '<div class="page-head"><div><h1 class="page-title">Projects</h1><p class="page-sub">' + plural(activeProjects().length, "project") + " running now.</p></div>" +
+    const head = '<div class="page-head"><div><h1 class="page-title">Projects</h1></div>' +
       (can.manage() ? '<button class="btn btn-primary" data-action="new-project">' + icon("plus") + "New project</button>" : "") + "</div>";
     if (!S.projects.length) return head + '<div class="card">' + empty("No projects yet.", can.manage() ? '<br><button class="btn btn-primary" data-action="new-project">Add your first project</button>' : "") + "</div>";
     const t = today();
@@ -929,7 +931,7 @@
     const recent = S.moves.filter((x) => x.materialId === m.id).slice(-4).reverse();
     const soon = S.needs.filter((n) => n.materialId === m.id && n.status !== "arrived");
     const fid = "mat-" + m.id;
-    const sub = [showCat ? catName(catOf(m)) : "", low ? '<span style="color:#B0661A">Running low, keep at least ' + m.min + "</span>" : "", soon.length ? soon.length + (soon.length > 1 ? " sites need it" : " site needs it") : ""].filter(Boolean).join(". ");
+    const sub = [showCat ? catName(catOf(m)) : "", low ? '<span style="color:#8A5A1E;font-weight:500">Low</span>' : "", "Min " + m.min, soon.length ? soon.length + " requested" : ""].filter(Boolean).join(", ");
     return '<details class="mrow" data-fold="' + fid + '"' + (ui.open.has(fid) ? " open" : "") + "><summary>" +
       '<div class="li-main"><div class="li-title">' + esc(m.name) + "</div>" + (sub ? '<div class="li-sub">' + sub + "</div>" : "") + "</div>" +
       '<span class="mat-qty num' + (low ? " low" : "") + '">' + m.qty.toLocaleString("en-MY") + '</span><span class="mat-unit muted small">' + esc(m.unit) + "</span>" +
@@ -959,7 +961,7 @@
       (!buy && low.length ? fchip("low", "Running low", low.length, "warn") : "") +
       CATS.filter((c) => counts[c.id]).map((c) => fchip(c.id, c.name, counts[c.id])).join("") + "</div>";
 
-    const head = '<div class="page-head"><div><h1 class="page-title">Stock</h1><p class="page-sub">What is in the yard, and what the sites still need.</p></div>' +
+    const head = '<div class="page-head"><div><h1 class="page-title">Stock' + helpBtn("In the yard: what you have in stock, by category. To buy: what the sites still need. Tap a material to see its last movements.") + "</h1></div>" +
       '<div class="row wrap"><button class="btn" data-action="open-material" data-kind="out">' + icon("out") + "Material out</button>" +
       '<button class="btn btn-primary" data-action="open-material" data-kind="in">' + icon("in") + "Material in</button></div></div>";
     const bar = '<div class="stock-bar"><div class="seg"><button class="' + (!buy ? "on" : "") + '" data-action="stock-tab" data-tab="yard">In the yard</button><button class="' + (buy ? "on" : "") + '" data-action="stock-tab" data-tab="buy">To buy (' + needs.length + ")</button></div>" +
@@ -1053,7 +1055,7 @@
 
     if (!can.seeMoney()) {
       const mine = receipts.filter((m) => m.by === role() && isOut(m));
-      return '<div class="page-head"><div><h1 class="page-title">Money</h1><p class="page-sub">Receipts and cash you logged. Company totals are only shown to management.</p></div>' +
+      return '<div class="page-head"><div><h1 class="page-title">Money' + helpBtn("Receipts and cash you logged, by category. Company totals are only shown to management.") + "</h1></div>" +
         '<button class="btn btn-primary" data-action="open-receipt">' + icon("camera") + "Snap a receipt</button></div>" +
         '<div class="row-between wrap" style="margin-bottom:16px">' + monthNav + projSel + "</div>" +
         receiptsBody(mine, "You have not logged anything this month.");
@@ -1078,14 +1080,14 @@
     const net6 = sum(weeks, (w) => w.inn - w.out);
     const flow = () => '<div class="dark-card"><div class="row small muted" style="gap:14px;margin-bottom:6px"><span class="row" style="gap:6px"><span class="dot" style="background:#8DB8B3"></span>Coming in</span><span class="row" style="gap:6px"><span class="dot" style="background:#A3B4CF"></span>Bills</span></div>' +
       weeks.map((w, i) => '<div class="flow-row"><span class="muted">' + (i === 0 ? "This week" : "From " + fmtDay(w.a).slice(4)) + '</span><div class="flow-bars"><span style="width:' + (w.inn / maxW) * 100 + '%;background:#8DB8B3"></span><span style="width:' + (w.out / maxW) * 100 + '%;background:#A3B4CF"></span></div><span class="num small" style="text-align:right">' + (w.inn - w.out >= 0 ? "+" : "−") + RMshort(Math.abs(w.inn - w.out)) + "</span></div>").join("") +
-      '<div class="muted tiny mt-8">Wages are not included yet.</div></div>';
+      '</div>';
 
     // where the money went
     const byCat = MCATS.map((c) => ({ c, v: sum(spentList.filter((m) => moneyCat(m) === c.id), (m) => m.amount) })).filter((x) => x.v > 0).sort((a, b) => b.v - a.v);
     const maxC = byCat.length ? byCat[0].v : 1;
     const spending = () => byCat.length ? byCat.map((x) => '<button class="spend-row" data-action="money-cat-open" data-cat="' + x.c.id + '"><span class="tile-ic sm">' + icon(x.c.icon) + '</span><span class="spend-name">' + esc(x.c.name) + '</span><span class="bar blue"><span style="width:' + (x.v / maxC) * 100 + '%"></span></span><span class="num spend-amt">' + RMshort(x.v) + ' <span class="muted small">' + Math.round((x.v / (spent || 1)) * 100) + "%</span></span></button>").join("") + '<p class="tiny muted mt-12">Tap a category to see its receipts.</p>' : empty("Nothing spent in " + MON_LONG[mo - 1] + ".");
 
-    return '<div class="page-head"><div><h1 class="page-title">Money</h1><p class="page-sub">Receipts, bills and client payments. Download the list for your accountant.</p></div>' +
+    return '<div class="page-head"><div><h1 class="page-title">Money' + helpBtn("Receipts, bills to pay and money expected from clients. Use “Download for accountant” to send the list to your accountant. Wages are not included in the cash plan yet.") + "</h1></div>" +
       '<div class="row wrap"><button class="btn" data-action="export-csv">' + icon("download") + "Download for accountant</button>" +
       '<button class="btn btn-primary" data-action="open-receipt">' + icon("camera") + "Snap a receipt</button></div></div>" +
       '<div class="row-between wrap" style="margin-bottom:16px">' + monthNav + projSel + "</div>" +
@@ -1117,27 +1119,49 @@
   }
   const needsConfirm = (r) => !!(r.self && ((r.self.in && !r.in) || (r.self.out && r.in && !r.out)));
 
-  function attCard(r) {
+  // one plain status per worker
+  function attStatus(r) {
+    const mt = matchOf(r);
+    if (r.status === "rejected") return { label: "Rejected", cls: "bad" };
+    if (r.status === "approved") return { label: "Approved", cls: "good" };
+    if (needsConfirm(r)) return { label: r.date === today() ? "Waiting for you" : "Not confirmed", cls: "warn" };
+    if (mt.key === "diff") return { label: mt.label.replace("Times differ by", "Times differ"), cls: "warn" };
+    if (mt.key === "manager") return { label: "No selfie from worker", cls: "warn" };
+    if (mt.key === "out") return { label: "Check clock-out", cls: "warn" };
+    if (!isDone(r)) return { label: "On site", cls: "info" };
+    return { label: can.approve() ? "Ready to approve" : "Waiting for site manager", cls: "" };
+  }
+  const isTodo = (r) => r.status === "waiting" && (needsConfirm(r) || !!matchOf(r).flag);
+
+  // compact row; tap to see the photos and Change / Reject
+  function attRow(r) {
     const w = worker(r.workerId); if (!w) return "";
-    const h = calcHours(r), e = eff(r), s = r.self || {}, mt = matchOf(r);
-    const done = !!e.out;
-    const st = r.status === "approved" ? chip("Approved", "good", "check") : r.status === "rejected" ? chip("Rejected", "bad") : !done ? chip("On site", "info") : chip("Waiting for check", "warn");
-    const pay = can.seePay() && done && r.status !== "rejected" ? '<span class="muted small">Pay ' + RM(Math.round(payFor(r))) + "</span>" : "";
+    const h = calcHours(r), e = eff(r), s = r.self || {}, st = attStatus(r), done = !!e.out;
     const dsp = openDispute(r.workerId, r.date);
+    const fid = "att-" + r.id;
+    const time = done ? e.in + "–" + e.out : "In " + (e.in || "");
+    let btn = "", approveInBody = false;
+    if (can.approve()) {
+      if (needsConfirm(r) && r.date === today()) { btn = '<button class="btn btn-sm btn-primary" data-action="clock-confirm" data-id="' + r.id + '" data-act="' + (r.in ? "out" : "in") + '">' + (r.in ? "Confirm out" : "Confirm") + "</button>"; approveInBody = r.status === "waiting" && done; }
+      else if (r.status === "waiting" && done) btn = '<button class="btn btn-sm btn-primary" data-action="att-ok" data-id="' + r.id + '">Approve</button>';
+    }
+    const icons = (s.in ? '<span class="mini-ic" title="Clocked in with a selfie">' + icon("camera") + "</span>" : "") +
+      (!hasPhone(w) ? '<span class="mini-ic" title="No smartphone, clocked in by site manager">' + icon("phoneoff") + "</span>" : "") +
+      (dsp ? '<span class="mini-ic warn" title="Worker report">' + icon("flag") + "</span>" : "");
     const both = s.in && r.in;
-    const times = both && mt.key === "diff" ? '<div class="tiny muted">In: worker ' + esc(s.in) + ", site manager " + esc(r.in) + (s.out || r.out ? ". Out: worker " + esc(s.out || "–") + ", site manager " + esc(r.out || "–") : "") + ".</div>" : "";
-    return '<div class="att-card ' + r.status + (mt.flag && r.status === "waiting" ? " flagged" : "") + (ui.attFocus === r.workerId ? " focus" : "") + '"><div class="row-between"><div class="li-main"><div class="li-title">' + esc(w.name) + '</div>' + (hasPhone(w) ? "" : '<div class="li-sub">No phone</div>') + "</div>" + st + "</div>" +
-      '<div class="row wrap" style="gap:6px">' + chip(mt.label, mt.cls, mt.key === "ok" ? "check" : mt.flag ? "alert" : "") + (dsp ? chip("Worker report", "warn", "flag") : "") + "</div>" +
-      '<div class="att-photos"><figure>' + img(e.inPhoto, "", w.name + " clock in") + "<figcaption>In " + esc(e.in || "") + (s.in && !r.in ? ", selfie" : "") + "</figcaption></figure><figure>" + (done ? img(e.outPhoto, "", w.name + " clock out") : '<div class="photo-missing">Not out yet</div>') + "<figcaption>" + (done ? "Out " + esc(e.out) + (s.out && !r.out ? ", selfie" : "") : "&nbsp;") + "</figcaption></figure></div>" +
-      times +
-      '<div class="row-between wrap"><div class="att-hours">' + esc(hoursText(h)) + (h && h.changed ? ' <span class="chip info" title="' + esc(r.adjust.reason || "") + '">Changed by site manager</span>' : h && !h.open ? ' <span class="muted small">(automatic)</span>' : "") + "</div>" + pay + "</div>" +
+    const body =
+      '<div class="att-photos"><figure>' + img(e.inPhoto, "", w.name + " clock in") + "<figcaption>In " + esc(e.in || "") + "</figcaption></figure><figure>" + (done ? img(e.outPhoto, "", w.name + " clock out") : '<div class="photo-missing">Not out yet</div>') + "<figcaption>" + (done ? "Out " + esc(e.out) : "&nbsp;") + "</figcaption></figure></div>" +
+      (r.confirmedIn ? '<div class="small muted">Selfie times confirmed by site manager at ' + esc(r.confirmedIn) + (r.confirmedOut ? " and " + esc(r.confirmedOut) : "") + "</div>" : both ? '<div class="small muted">Worker ' + esc(s.in) + (s.out ? "–" + esc(s.out) : "") + ", site manager " + esc(r.in) + (r.out ? "–" + esc(r.out) : "") + "</div>" : "") +
+      (done && h ? '<div class="small">' + esc(hoursText(h)) + (h.changed ? ' <span class="muted">(changed by site manager: ' + esc(r.adjust.reason || "") + ")</span>" : "") + (can.seePay() && r.status !== "rejected" ? ' <span class="muted">Pay ' + RM(Math.round(payFor(r))) + "</span>" : "") + "</div>" : "") +
       (dsp ? '<div class="report">' + icon("flag") + "<div><b>" + esc(w.name.split(" ")[0]) + " says: " + esc(dsp.reason) + "</b>" + (dsp.note ? "<br>“" + esc(dsp.note) + "”" : "") + "</div>" + (can.approve() ? '<button class="btn btn-sm" data-action="dispute-done" data-id="' + dsp.id + '">Sorted</button>' : "") + "</div>" : "") +
       (r.note ? '<div class="small muted">' + esc(r.note) + "</div>" : "") +
-      (can.approve() ? '<div class="att-actions">' + (needsConfirm(r) && r.date === today() ? '<button class="btn btn-sm btn-primary" data-action="clock-confirm" data-id="' + r.id + '" data-act="' + (r.in ? "out" : "in") + '">' + icon("check") + (r.in ? "Confirm out" : "Confirm") + "</button>" :
-        r.status !== "approved" ? '<button class="btn btn-sm btn-primary" data-action="att-ok" data-id="' + r.id + '"' + (!done ? " disabled" : "") + ">" + icon("check") + "Approve</button>" : "") +
+      (can.approve() ? '<div class="row wrap" style="gap:8px">' + (approveInBody ? '<button class="btn btn-sm btn-soft" data-action="att-ok" data-id="' + r.id + '">Approve</button>' : "") +
         '<button class="btn btn-sm btn-soft" data-action="att-edit" data-id="' + r.id + '">' + icon("edit") + "Change</button>" +
-        (r.status !== "rejected" ? '<button class="btn btn-sm btn-danger" data-action="att-no" data-id="' + r.id + '" aria-label="Reject">' + icon("x") + "</button>" : "") + "</div>" : "") +
-      "</div>";
+        (r.status !== "rejected" ? '<button class="btn btn-sm btn-danger" data-action="att-no" data-id="' + r.id + '">' + icon("x") + "Reject</button>" : "") + "</div>" : "");
+    return '<details class="arow' + (ui.attFocus === r.workerId ? " focus" : "") + '" data-fold="' + fid + '"' + (ui.open.has(fid) || ui.attFocus === r.workerId ? " open" : "") + "><summary>" +
+      '<span class="arow-pic">' + img(e.inPhoto, "", w.name) + "</span>" +
+      '<span class="li-main"><span class="arow-name">' + esc(w.name) + icons + '</span><span class="arow-sub">' + esc(time) + " " + chip(st.label, st.cls) + "</span></span>" +
+      btn + '</summary><div class="arow-body">' + body + "</div></details>";
   }
 
   // one short line listing other days that still need a look (waiting records and/or worker reports)
@@ -1149,58 +1173,44 @@
     if (!days.length) return "";
     return '<div class="wait-days small"><span class="muted">Other days:</span>' + days.map((k) => '<button class="chip warn" data-action="att-goto" data-d="' + k + '">' + fmtDay(k) + (m[k].n ? ", " + m[k].n + " waiting" : "") + (m[k].r ? (m[k].n ? " + report" : ", report") : "") + "</button>").join("") + "</div>";
   }
+
   function viewAttendance() {
     const sid = ui.attSite || defaultAttSite();
     ui.attSite = sid;
     const d = ui.attDate;
     const p = project(sid);
-    const order = (r) => (r.status === "waiting" && matchOf(r).flag ? 0 : r.status === "waiting" && isDone(r) ? 1 : r.status === "waiting" ? 2 : r.status === "approved" ? 3 : 4);
     const focus = (r) => (ui.attFocus && r.workerId === ui.attFocus ? -1 : 0);
+    const order = (r) => (isTodo(r) ? 0 : r.status === "waiting" && isDone(r) ? 1 : r.status === "waiting" ? 2 : r.status === "approved" ? 3 : 4);
     const recs = S.attendance.filter((a) => a.projectId === sid && a.date === d).sort((a, b) => focus(a) - focus(b) || order(a) - order(b));
     const expected = expectedWorkers(sid, d);
     const missing = expected.filter((w) => !recs.some((r) => r.workerId === w.id));
-    const waiting = recs.filter((r) => r.status === "waiting" && isDone(r));
-    const easy = waiting.filter((r) => !matchOf(r).flag);
-    const flagged = recs.filter((r) => r.status === "waiting" && matchOf(r).flag);
-    const approved = recs.filter((r) => r.status === "approved").length;
-    const sitePick = '<select class="input pill-select" data-change="attSite" aria-label="Site">' + S.projects.map((x) => '<option value="' + x.id + '"' + (x.id === sid ? " selected" : "") + ">" + esc(x.name) + "</option>").join("") + "</select>";
-    const nav = '<div class="cal-head"><button class="icon-btn" data-action="att-day" data-step="-1" aria-label="Previous day">' + icon("left") + '</button><div class="cal-month" style="min-width:150px">' + (d === today() ? "Today" : fmtDay(d)) + '</div><button class="icon-btn" data-action="att-day" data-step="1" aria-label="Next day"' + (d >= today() ? " disabled" : "") + ">" + icon("right") + "</button></div>";
+    const todo = recs.filter(isTodo);
+    const easy = recs.filter((r) => r.status === "waiting" && isDone(r) && !matchOf(r).flag && !needsConfirm(r));
+    let tab = ui.attFilter;
+    if (["todo", "all", "missing"].indexOf(tab) < 0) tab = todo.length ? "todo" : "all";
     const otherReports = S.disputes.filter((x) => x.status === "open" && x.projectId === sid && x.date !== d);
 
-    // filters (the numbers at the top are buttons)
-    const F_ = {
-      all: { label: "clocked in", list: recs },
-      selfie: { label: "took a selfie", list: recs.filter((r) => r.self && r.self.in) },
-      confirm: { label: "waiting for you", list: recs.filter(needsConfirm) },
-      look: { label: "to look at", list: flagged, warn: true },
-      missing: { label: "did not clock in", list: missing }
+    const controls = '<div class="att-controls"><div class="date-step"><button class="icon-btn sm" data-action="att-day" data-step="-1" aria-label="Previous day">' + icon("left") + '</button><b>' + (d === today() ? "Today" : fmtDay(d)) + '</b><button class="icon-btn sm" data-action="att-day" data-step="1" aria-label="Next day"' + (d >= today() ? " disabled" : "") + ">" + icon("right") + "</button></div>" +
+      '<select class="input pill-select" data-change="attSite" aria-label="Site">' + S.projects.map((x) => '<option value="' + x.id + '"' + (x.id === sid ? " selected" : "") + ">" + esc(x.name) + "</option>").join("") + "</select></div>";
+    const tabs = '<div class="tiles att-tabs">' + [["todo", "To do", todo.length, todo.length > 0], ["all", "Everyone", recs.length], ["missing", "Not in", missing.length]].map((x) =>
+      '<button class="tile' + (tab === x[0] ? " on" : "") + (x[3] ? " warn" : "") + '" data-action="att-filter" data-f="' + x[0] + '"><span class="tile-label">' + x[1] + '</span><span class="tile-n">' + x[2] + "</span></button>").join("") + "</div>";
+    const wages = can.seePay() ? '<p class="att-wages small"><span class="muted">Wages for the day (approved)</span> <b class="num">' + RM(Math.round(sum(recs.filter((r) => r.status === "approved"), payFor))) + "</b></p>" : "";
+    const missingRow = (w) => { const dsp = openDispute(w.id, d); return '<div class="li">' + avatar(w) + '<div class="li-main"><div class="li-title">' + esc(w.name) + (dsp ? '<span class="mini-ic warn" title="Worker report: ' + esc(dsp.reason) + '">' + icon("flag") + "</span>" : "") + '</div><div class="li-sub">' + esc(crew(w.crewId) ? crew(w.crewId).name : "") + "</div></div>" + (can.approve() ? '<button class="btn btn-sm btn-soft" data-action="att-add" data-w="' + w.id + '">Add by hand</button>' : "") + "</div>"; };
+    const byCrew = (list) => {
+      const g = {};
+      list.forEach((r) => { const c = (worker(r.workerId) || {}).crewId || "none"; (g[c] = g[c] || []).push(r); });
+      return Object.keys(g).map((c) => '<div class="crew-head">' + esc(crew(c) ? crew(c).name : "Other") + '<span class="muted">' + g[c].length + '</span></div><div class="card alist">' + g[c].map(attRow).join("") + "</div>").join("");
     };
-    const fk = F_[ui.attFilter] ? ui.attFilter : "all";
-    const filterBar = '<div class="card att-sum">' + Object.keys(F_).map((k) => '<button class="att-f' + (fk === k ? " on" : "") + '" data-action="att-filter" data-f="' + k + '"><b class="num' + (F_[k].warn && F_[k].list.length ? " warn" : "") + '">' + F_[k].list.length + "</b><span>" + F_[k].label + "</span></button>").join("") +
-      "</div>" + (can.seePay() ? '<p class="att-wages small"><span class="muted">Wages for the day (approved)</span> <b class="num">' + RM(Math.round(sum(recs.filter((r) => r.status === "approved"), payFor))) + "</b></p>" : "");
-    const missingRow = (w) => { const dsp = openDispute(w.id, d); return '<div class="li">' + avatar(w) + '<div class="li-main"><div class="li-title">' + esc(w.name) + '</div><div class="li-sub">' + esc(crew(w.crewId) ? crew(w.crewId).name : "") + (dsp ? ', <span style="color:#7A4E18">reported: ' + esc(dsp.reason) + (dsp.note ? ", “" + esc(dsp.note) + "”" : "") + "</span>" : "") + "</div></div>" + (can.approve() ? '<button class="btn btn-sm btn-soft" data-action="att-add" data-w="' + w.id + '">Add by hand</button>' : "") + "</div>"; };
-    const filtered = fk === "all" ? null : fk === "missing" ? (missing.length ? '<div class="card"><div class="list">' + missing.map(missingRow).join("") + "</div></div>" : "") : (F_[fk].list.length ? '<div class="att-grid">' + F_[fk].list.map(attCard).join("") + "</div>" : "");
+    let list;
+    if (tab === "todo") list = todo.length ? '<div class="card alist">' + todo.map(attRow).join("") + "</div>" : '<div class="card">' + empty("Nothing to do. Everyone is confirmed.") + "</div>";
+    else if (tab === "missing") list = missing.length ? '<div class="card alist">' + missing.map(missingRow).join("") + "</div>" : '<div class="card">' + empty("Everyone booked here clocked in.") + "</div>";
+    else list = recs.length ? byCrew(recs) : '<div class="card">' + empty(isSunday(d) ? "Sunday. Rest day." : "Nobody clocked in at this site on this day.") + "</div>";
 
-    // one folder per crew
-    const crewIds = Array.from(new Set(recs.map((r) => (worker(r.workerId) || {}).crewId).concat(missing.map((w) => w.crewId)))).filter(Boolean);
-    const groups = crewIds.map((cid) => {
-      const cr = recs.filter((r) => (worker(r.workerId) || {}).crewId === cid);
-      const cm = missing.filter((w) => w.crewId === cid);
-      const nWait = cr.filter((r) => r.status === "waiting" && isDone(r)).length;
-      const nFlag = cr.filter((r) => r.status === "waiting" && matchOf(r).flag).length;
-      const sub = [plural(cr.length, "clocked in", "clocked in"), nWait ? nWait + " waiting" : "", nFlag ? '<span style="color:#B0661A">' + nFlag + " to look at</span>" : "", cm.length ? cm.length + " missing" : ""].filter(Boolean).join(", ");
-      const body = (cr.length ? '<div class="att-grid">' + cr.map(attCard).join("") + "</div>" : "") +
-        (cm.length ? '<div class="crew-head" style="margin-top:14px">Did not clock in<span class="muted">' + cm.length + '</span></div><div class="list">' + cm.map((w) => { const dsp = openDispute(w.id, d); return '<div class="li">' + avatar(w) + '<div class="li-main"><div class="li-title">' + esc(w.name) + "</div>" + (dsp ? '<div class="li-sub" style="color:#B0661A">Reported: ' + esc(dsp.reason) + (dsp.note ? ", “" + esc(dsp.note) + "”" : "") + "</div>" : "") + "</div>" + (can.approve() ? '<button class="btn btn-sm btn-soft" data-action="att-add" data-w="' + w.id + '">Add by hand</button>' : "") + "</div>"; }).join("") + "</div>" : "");
-      return fold("attc-" + cid + "-" + d, esc(crew(cid) ? crew(cid).name : "Crew"), sub, "", body, { defaultOpen: crewIds.length === 1 });
-    }).join("");
-
-    return '<div class="page-head"><div><h1 class="page-title">Check attendance</h1><p class="page-sub">' + (can.approve() ? "Green means the worker and you agree. Amber needs a look. Hours are worked out automatically, but you have the final say." : "Only the site manager can approve or change attendance. You can see everything here.") + "</p></div>" +
-      (can.approve() && easy.length ? '<button class="btn btn-primary" data-action="att-all">' + icon("check") + "Approve " + easy.length + " matched</button>" : "") + "</div>" +
-      '<div class="row-between wrap" style="margin-bottom:16px">' + nav + sitePick + "</div>" +
-      otherDaysLine(sid, d, otherReports) +
-      (p ? filterBar : "") +
-      (filtered !== null ? (filtered || '<div class="card">' + empty("Nobody here right now. Tap “clocked in” to see everyone.") + "</div>") :
-        (groups || '<div class="card">' + empty(isSunday(d) ? "Sunday. Rest day." : "Nobody clocked in at this site on this day.") + "</div>"));
+    const help = can.approve() ? "To do: workers waiting for you to confirm, or where your time and the worker's differ by more than " + S.settings.matchMinutes + " minutes. Hours are worked out automatically, but you have the final say. Tap a worker to see the photos, change the hours or reject the day."
+      : "Only the site manager can confirm, approve or change attendance. Tap a worker to see the photos.";
+    return '<div class="page-head"><div><h1 class="page-title">Check attendance' + helpBtn(help) + "</h1></div>" +
+      (can.approve() && easy.length ? '<button class="btn btn-primary btn-sm" data-action="att-all">' + icon("check") + "Approve " + easy.length + " ready</button>" : "") + "</div>" +
+      controls + otherDaysLine(sid, d, otherReports) + (p ? tabs + wages : "") + list;
   }
 
   /* ---------- Construction worker (own phone) ---------- */
@@ -1265,7 +1275,7 @@
     const confirmLine = s.in ? '<div class="card w-today"><div class="w-today-head">' + tr("today") + '</div><div class="att-photos">' +
       "<figure>" + img(s.inPhoto, "", tr("clockIn")) + "<figcaption>" + tr("clockIn") + " " + esc(s.in) + "</figcaption></figure>" +
       "<figure>" + (s.out ? img(s.outPhoto, "", tr("clockOut")) : '<div class="photo-missing">' + tr("notYet") + "</div>") + "<figcaption>" + tr("clockOut") + " " + (s.out ? esc(s.out) : "–") + "</figcaption></figure></div>" +
-      (needsConfirm(r) ? '<div class="w-status wait">' + icon("clock") + tr("waitingConfirm") + "</div>" : '<div class="w-status">' + icon("check") + tr("confirmed") + (r.in ? " " + esc(s.out && r.out ? r.out : r.in) : "") + "</div>") + "</div>" : "";
+      (needsConfirm(r) ? '<div class="w-status wait">' + icon("clock") + tr("waitingConfirm") + "</div>" : '<div class="w-status">' + icon("check") + tr("confirmed") + (r.confirmedIn ? " " + esc(s.out && r.confirmedOut ? r.confirmedOut : r.confirmedIn) : "") + "</div>") + "</div>" : "";
     const mk = monthKey(t), m = workerMonth(w, mk);
     const hourly = w.dayRate / S.settings.normalHours * S.settings.otRate;
     const dayRows = m.recs.length ? '<div class="list">' + m.recs.map((x) => { const h = calcHours(x); const f = h.final; return '<div class="li"><div class="li-main"><div class="li-title">' + fmtDay(x.date) + '</div><div class="li-sub">' + (f.half ? "½ " : "") + hrs(f.normal) + (f.ot ? " + " + hrs(f.ot) + " " + tr("ot") : "") + "</div></div>" +
@@ -1285,7 +1295,7 @@
   /* ---------- Workers & crews ---------- */
   function viewTeam() {
     const t = today();
-    return '<div class="page-head"><div><h1 class="page-title">Workers &amp; crews</h1><p class="page-sub">' + plural(S.workers.length, "worker") + " in " + plural(S.crews.length, "crew") + ".</p></div>" +
+    return '<div class="page-head"><div><h1 class="page-title">Workers &amp; crews</h1></div>' +
       (can.manage() ? '<div class="row wrap"><button class="btn" data-action="new-crew">' + icon("plus") + 'New crew</button><button class="btn btn-primary" data-action="new-worker">' + icon("plus") + "Add worker</button></div>" : "") + "</div>" +
       S.crews.map((c) => {
         const ws = crewWorkers(c.id);
@@ -1302,7 +1312,7 @@
   function viewSettings() {
     const s = S.settings;
     const dis = can.manage() ? "" : " disabled";
-    return '<div class="page-head"><div><h1 class="page-title">Settings</h1><p class="page-sub">' + (can.manage() ? "Rules used to work out hours and overtime." : "Only management can change these.") + "</p></div></div>" +
+    return '<div class="page-head"><div><h1 class="page-title">Settings' + helpBtn(can.manage() ? "Rules used to work out hours, overtime and pay, and how long worker photos are kept." : "Only management can change these.") + "</h1></div></div>" +
       '<div class="grid-2"><div class="card"><h2 class="card-title">Working hours</h2>' +
       '<label class="field"><span>Company name</span><input class="input" data-setting="company" value="' + esc(S.company.name) + '"' + dis + "></label>" +
       '<label class="field"><span>Normal hours in a full day</span><input class="input" type="number" step="0.5" min="1" data-setting="normalHours" value="' + s.normalHours + '"' + dis + "></label>" +
@@ -1342,6 +1352,7 @@
   const errBox = () => (ui.sheet.err ? '<div class="form-error">' + ui.sheet.err + "</div>" : "");
 
   const SHEETS = {
+    help(s) { return sheetHead("How this page works") + '<p class="help-text">' + esc(s.text) + "</p>"; },
     notes() {
       const list = myNotes().slice(0, 40);
       const W_ = role() === "worker";
@@ -1673,16 +1684,18 @@
       if (role() === "worker") { render(); return; }
       ui.attSite = n.projectId; ui.attDate = n.forDate || n.date; ui.attPicked = true;
       const r = S.attendance.find((a) => a.workerId === n.workerId && a.date === ui.attDate);
-      ui.attFilter = n.type === "report" ? "all" : r && needsConfirm(r) ? "confirm" : "selfie";
+      ui.attFilter = n.type === "report" ? "all" : r && isTodo(r) ? "todo" : "all";
       ui.attFocus = n.workerId;
       if (location.hash === "#/attendance") render(); else location.hash = "#/attendance";
     },
+    help(el) { openSheet({ type: "help", text: el.dataset.t }); },
     "att-filter"(el) { ui.attFilter = el.dataset.f; ui.attFocus = null; render(); },
-    "att-review"(el) { ui.attSite = el.dataset.site; ui.attDate = today(); ui.attFilter = "confirm"; ui.attPicked = true; location.hash = "#/attendance"; },
+    "att-review"(el) { ui.attSite = el.dataset.site; ui.attDate = today(); ui.attFilter = "todo"; ui.attPicked = true; location.hash = "#/attendance"; },
     "clock-confirm"(el) {
       const r = S.attendance.find((a) => a.id === el.dataset.id); if (!r) return;
       const w = worker(r.workerId), tm = nowHM();
-      if (el.dataset.act === "in") r.in = tm; else r.out = tm;
+      // confirming = agreeing with the worker's selfie time; we also keep when it was confirmed
+      if (el.dataset.act === "in") { r.in = (r.self && r.self.in) || tm; r.confirmedIn = tm; } else { r.out = (r.self && r.self.out) || tm; r.confirmedOut = tm; }
       notify({ type: "confirmed", to: "worker", workerId: r.workerId, projectId: r.projectId });
       save(); toast(esc(w.name) + (el.dataset.act === "in" ? " confirmed in at " : " confirmed out at ") + tm);
       if (ui.sheet && ui.sheet.type === "clock") renderSheet();
@@ -1691,7 +1704,7 @@
     "confirm-all"(el) {
       const tm = nowHM();
       const list = S.attendance.filter((a) => a.projectId === el.dataset.site && a.date === today() && a.self && ((a.self.in && !a.in) || (a.self.out && a.in && !a.out)));
-      list.forEach((a) => { if (!a.in) a.in = tm; else a.out = tm; notify({ type: "confirmed", to: "worker", workerId: a.workerId, projectId: a.projectId }); });
+      list.forEach((a) => { if (!a.in) { a.in = a.self.in || tm; a.confirmedIn = tm; } else { a.out = a.self.out || tm; a.confirmedOut = tm; } notify({ type: "confirmed", to: "worker", workerId: a.workerId, projectId: a.projectId }); });
       save(); toast("Confirmed " + plural(list.length, "worker") + ".");
       if (ui.sheet && ui.sheet.type === "clock") renderSheet();
       render();
@@ -1907,14 +1920,14 @@
 
     /* attendance check */
     "att-for"(el) { ui.attSite = el.dataset.id; ui.attDate = pickAttDate(el.dataset.id); ui.attPicked = true; },
-    "att-goto"(el) { ui.attDate = el.dataset.d; render(); },
-    "att-day"(el) { const d = addDays(ui.attDate, +el.dataset.step); if (d <= today()) { ui.attDate = d; render(); } },
+    "att-goto"(el) { ui.attDate = el.dataset.d; ui.attFilter = null; ui.attFocus = null; render(); },
+    "att-day"(el) { const d = addDays(ui.attDate, +el.dataset.step); if (d <= today()) { ui.attDate = d; ui.attFilter = null; ui.attFocus = null; render(); } },
     "att-ok"(el) { const r = S.attendance.find((a) => a.id === el.dataset.id); r.status = "approved"; save(); render(); toast("Approved."); },
     "att-no"(el) { const r = S.attendance.find((a) => a.id === el.dataset.id); r.status = "rejected"; save(); render(); toast("Rejected. This day will not be paid.", "x"); },
     "att-all"() {
       const list = S.attendance.filter((a) => a.projectId === ui.attSite && a.date === ui.attDate && a.status === "waiting" && isDone(a) && !matchOf(a).flag);
       list.forEach((a) => { a.status = "approved"; });
-      save(); render(); toast("Approved " + plural(list.length, "matched record") + ". Amber ones still need a look.");
+      save(); render(); toast("Approved " + plural(list.length, "record") + ". Anything under “To do” still needs a look.");
     },
     "att-edit"(el) { openSheet({ type: "attEdit", recId: el.dataset.id }); },
     "att-add"(el) { openSheet({ type: "attEdit", workerId: el.dataset.w }); },
@@ -1999,12 +2012,12 @@
       if (el.dataset.rerender) renderSheet();
     }
     const c = el.dataset.change;
-    if (c === "role") { S.role = el.value; save(); ui.attSite = null; ui.attFilter = "all"; ui.attFocus = null; enterRoute(); render(); toast("Now viewing as " + ROLE_LABEL[S.role].toLowerCase() + "." + (unreadCount() ? " You have " + plural(unreadCount(), "new notification") + "." : "")); }
+    if (c === "role") { S.role = el.value; save(); ui.attSite = null; ui.attFilter = null; ui.attFocus = null; enterRoute(); render(); toast("Now viewing as " + ROLE_LABEL[S.role].toLowerCase() + "." + (unreadCount() ? " You have " + plural(unreadCount(), "new notification") + "." : "")); }
     if (c === "site") { S.people.site.siteId = el.value; save(); render(); }
     if (c === "wlang") { if (me()) me().lang = el.value; W().lang = el.value; save(); render(); }
     if (c === "moneyProject") { ui.moneyProject = el.value; render(); }
     if (c === "calProject") { ui.calProject = el.value; render(); }
-    if (c === "attSite") { ui.attSite = el.value; ui.attDate = pickAttDate(el.value); render(); }
+    if (c === "attSite") { ui.attSite = el.value; ui.attDate = pickAttDate(el.value); ui.attFilter = null; render(); }
     if (c === "clockSite" && ui.sheet) { ui.sheet.siteId = el.value; renderSheet(); }
     if (el.dataset.setting) {
       const k = el.dataset.setting;

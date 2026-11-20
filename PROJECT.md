@@ -183,7 +183,7 @@ one are clocked in by the site manager with a photo, as before.
 ## 7. How it works (technical)
 
 - **No build step.** `index.html` loads `styles.css`, `three.min.js` (3D library, MIT, bundled locally), `factory3d.js`, `sample-data.js` and `app.js`.
-- **Updates reach phones straight away:** `index.html` links every file with a version number (`app.js?v=0.4.2`). Bump it on each release so browsers don't keep showing an old cached copy (GitHub Pages lets browsers cache files for 10 minutes).
+- **Updates reach phones straight away:** `index.html` links every file with a version number (`app.js?v=0.4.3`). Bump it on each release so browsers don't keep showing an old cached copy (GitHub Pages lets browsers cache files for 10 minutes).
 - **Data:** everything except photos is one JSON object in `localStorage` (`sitebook-data-v1`). Photos are compressed to ~720px JPEG and kept in **IndexedDB** (`sitebook-photos`).
 - **Screens** are functions returning HTML; clicks are handled in one place through `data-action` attributes.
 - **3D buildings** (`factory3d.js`): each project gets its own randomly generated factory (sawtooth roof, silos) or warehouse (gable roof, loading docks), seeded by the project id. The model shows progress: steel frame → walls going up (teal) → finished, with a tower crane until 92%. One shared WebGL view plus one for still thumbnails. Falls back to a line drawing if WebGL is not available.
@@ -242,6 +242,19 @@ Site manager only worker has no phone                             → neutral, n
 10. **e-Invoicing (LHDN MyInvois)** is being phased in. Accountants will ask for supplier TIN and e-invoice numbers. Plan fields for it before production.
 
 ## 9. Change log
+
+### v0.4.3 — 20 Nov 2026 — less text everywhere, compact attendance list
+Client feedback: "it still looks very messy and cluttered, the words are everywhere". Six changes, each approved one by one:
+1. **Explanations behind a ? button.** The sentences under page titles (Check attendance, Calendar, Stock, Money, Settings) moved into a small **?** next to the title. Count lines ("4 projects running now", "50 workers in 5 crews") and "Every site at a glance" are gone.
+2. **One compact control row** on Check attendance: small ‹ Today › arrows on the left, the site picker on the right.
+3. **Workers are compact rows**: small selfie, name, time, one status and one button (Confirm / Approve). Tap a row to see the big photos, hours, pay (management) and Change / Reject.
+4. **One status per worker** in plain words: Waiting for you, On site, Ready to approve, Times differ 29 min, No selfie from worker, Approved, Rejected. A camera icon marks a selfie, a crossed-out phone icon marks a worker without a smartphone, and a flag marks a worker report.
+5. **3 tabs**: To do (waiting for you or needs a look), Everyone (grouped by crew), Not in. Opens on To do when there is something to do.
+6. **Same clean-up on other pages**: shorter stock rows ("Low, Min 120, 1 requested"), buy-list rows without notes, and fewer words on the cash card.
+
+Also:
+- **Rule change: tapping Confirm now agrees with the worker's selfie time.** The time the site manager confirmed is saved separately ("Selfie times confirmed by site manager at 16:32"). Before, the tap time replaced the selfie time, so every late confirmation was flagged as "times differ". Times are now only flagged when both sides recorded times independently.
+- **Updates show straight away:** every file link in `index.html` carries the version number, so phones don't keep an old cached copy.
 
 ### v0.4.2 — 20 Nov 2026 — tidier attendance filters on phones
 Client feedback: "this part of the UI on mobile looks cluttered".

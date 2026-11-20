@@ -654,6 +654,38 @@ button.chip:hover { text-decoration: underline; text-underline-offset: 3px; }
 .w-today .w-status { margin-top: 12px; }
 .w-today .att-photos figure { width: min(48%, 180px); }
 
+
+/* ---------- v0.4.3 decluttered pages ---------- */
+.help-btn { display: inline-grid; place-items: center; width: 24px; height: 24px; margin-left: 10px; vertical-align: 3px; border-radius: 50%; border: 1px solid var(--line); background: var(--page); color: var(--muted); font-size: 13px; font-weight: 600; line-height: 1; }
+.help-btn:hover { color: var(--ink); border-color: var(--ink-2); }
+.help-text { font-size: 16px; line-height: 1.55; color: var(--ink-2); margin-top: 6px; max-width: 60ch; }
+.att-controls { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.date-step { display: flex; align-items: center; gap: 4px; flex: none; }
+.date-step b { font-weight: 600; min-width: 92px; text-align: center; font-size: 15.5px; }
+.date-step .icon-btn[disabled] { opacity: .35; }
+.att-controls select.pill-select { width: auto; max-width: 260px; min-height: 40px; font-size: 14.5px; }
+.att-tabs { margin: 4px 0 14px; }
+.att-tabs .tile { padding-top: 10px; }
+.alist { padding: 0 16px; }
+.alist .li { padding: 12px 0; }
+details.arow { border-top: 1px solid var(--line); }
+details.arow:first-child { border-top: 0; }
+details.arow > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 12px; padding: 11px 0; }
+details.arow > summary::-webkit-details-marker { display: none; }
+details.arow.focus > summary { box-shadow: inset 3px 0 0 var(--blue); padding-left: 10px; margin-left: -16px; padding-left: 13px; }
+.arow-pic { width: 44px; height: 44px; flex: none; border-radius: 6px; overflow: hidden; background: var(--bg); }
+.arow-pic img, .arow-pic .photo-missing { width: 100%; height: 100%; object-fit: cover; font-size: 9px; }
+.arow-name { display: flex; align-items: center; gap: 6px; font-weight: 500; font-size: 15.5px; min-width: 0; }
+.arow-sub { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; color: var(--muted); font-size: 13.5px; margin-top: 1px; }
+.arow-sub .chip { font-size: 13.5px; }
+.mini-ic { display: inline-grid; place-items: center; color: var(--muted); }
+.mini-ic svg { width: 14px; height: 14px; }
+.mini-ic.warn { color: var(--amber); }
+.arow-body { padding: 2px 0 16px 56px; display: grid; gap: 10px; }
+.arow-body .att-photos figure { width: min(46%, 150px); }
+.crew-head + .card.alist { margin-top: 6px; }
+.card.alist + .crew-head { margin-top: 18px; }
+
 /* ---------- Bottom nav (phones) ---------- */
 .bottomnav { display: none; }
 .fab { display: none; }
@@ -724,6 +756,13 @@ button.chip:hover { text-decoration: underline; text-underline-offset: 3px; }
   .cal-month { min-width: 0; font-size: 18px; }
   .day-panel { margin-top: 0; }
   .mobile-only { display: flex !important; }
+  .att-controls { gap: 8px; }
+  .att-controls select.pill-select { width: auto; flex: 1; min-width: 0; max-width: none; }
+  .date-step b { min-width: 64px; font-size: 15px; }
+  .arow-body { padding-left: 0; }
+  details.arow > summary .btn { padding: 0 12px; }
+  .page-head { margin: 10px 0 14px; }
+
   /* attendance filters: one swipeable row of compact buttons */
   .att-sum { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; gap: 8px; padding: 2px 16px 4px; margin: 0 -16px 14px; background: none; box-shadow: none; border-radius: 0; }
   .att-sum::-webkit-scrollbar { display: none; }
@@ -764,6 +803,7 @@ button.chip:hover { text-decoration: underline; text-underline-offset: 3px; }
   .wk-on { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--teal); }
   .wk-day.hit .n { background: var(--teal-soft); }
   select.pill-select { width: 100%; }
+  .att-controls select.pill-select { width: auto; }
 
   .desktop-only, .hide-sm { display: none !important; }
   details.mrow > summary { gap: 10px; }
