@@ -441,11 +441,6 @@
 
   function renderTop() {
     const top = $("#topbar"), bn = $("#bottomnav");
-    if (!S) {
-      top.innerHTML = '<a class="brand" href="#/today"><span class="brand-mark">' + icon("logo") + '</span><span>SiteBook<small>for construction teams</small></span></a>';
-      bn.innerHTML = ""; $("#fab") && $("#fab").remove();
-      return;
-    }
     const r = route(), t = tabOf(r);
     const isW = role() === "worker";
     document.body.classList.toggle("is-worker", isW);
@@ -476,14 +471,13 @@
       '<a href="#/settings" role="menuitem">' + icon("sliders") + "Settings</a>" +
       "<hr>" +
       '<button data-action="reset-sample" role="menuitem">' + icon("refresh") + "Reload sample data</button>" +
-      '<button data-action="wipe" role="menuitem">' + icon("trash") + "Clear everything</button>" +
+      '<button data-action="wipe" role="menuitem">' + icon("trash") + "Clear everything, start empty</button>" +
       "</div>";
   }
 
   function render() {
     renderTop();
     const main = $("#main");
-    if (!S) { main.innerHTML = viewWelcome(); after(); return; }
     const r = route();
     if (role() === "worker") { main.innerHTML = viewWorker(); after(); if (ui.sheet && /^(wclock|wreport)$/.test(ui.sheet.type)) renderSheet(); return; }
     const views = { today: viewToday, calendar: viewCalendar, projects: viewProjects, project: viewProject, stock: viewStock, money: viewMoney, attendance: viewAttendance, team: viewTeam, settings: viewSettings };
@@ -494,9 +488,8 @@
   function after() {
     hydratePhotos();
     $$("[data-3d]").forEach((el) => {
-      const p = S ? project(el.dataset["3d"]) : null;
+      const p = project(el.dataset["3d"]);
       if (p) window.Factory3D.attach(el, { seed: p.id + p.name, progress: progress(p), type: p.type });
-      else window.Factory3D.attach(el, { seed: "welcome", progress: 0.62, type: "factory" });
     });
     $$("details[data-fold]").forEach((d) => d.addEventListener("toggle", () => { d.open ? ui.open.add(d.dataset.fold) : ui.open.delete(d.dataset.fold); }));
   }
@@ -565,21 +558,6 @@
   /* ======================================================================
      5. Screens
      ====================================================================== */
-  function viewWelcome() {
-    return '<section class="welcome">' +
-      "<div><h1>Your jobs, workers, stock and money in one place.</h1>" +
-      "<p>Clock workers in with a photo, see who is free on which day, know what to buy, and keep every receipt — without chasing WhatsApp groups and Excel files.</p>" +
-      '<ul class="welcome-list">' +
-      "<li>" + icon("check") + "Clock in a worker in two taps</li>" +
-      "<li>" + icon("check") + "Snap a receipt and it goes to the right project</li>" +
-      "<li>" + icon("check") + "See which crews are free on any day</li></ul>" +
-      '<div class="row wrap mt-24" style="gap:12px"><button class="btn btn-primary btn-big" data-action="load-sample">Try with sample data</button>' +
-      '<button class="btn btn-big btn-line" data-action="start-empty">Start empty</button></div>' +
-      '<p class="small muted" style="font-size:14px">Prototype. Everything you enter stays in this browser on this device.</p></div>' +
-      '<div class="hero"><div class="hero-3d" data-3d="welcome"></div><div class="hero-hint" style="bottom:22px">Drag to turn</div></div>' +
-      "</section>";
-  }
-
   /* ---------- Today ---------- */
   function viewToday() {
     if (role() === "site") return todaySite();
@@ -631,13 +609,13 @@
       '<div class="flow-row"><span class="muted">Bills to pay</span><div class="flow-bars"><span style="width:' + (outSum / maxV) * 100 + '%;background:#8FA8E8"></span></div><span class="num">' + RMshort(outSum) + "</span></div>" +
       '<div class="muted tiny mt-8">Wages are not included yet.</div></div>' +
       "</div></div>" +
-      '<div class="section"><h2 class="section-title">Projects <a class="link-btn small" href="#/projects">See all</a></h2><div class="card"><div class="list">' +
+      (!S.projects.length ? "" : '<div class="section"><h2 class="section-title">Projects <a class="link-btn small" href="#/projects">See all</a></h2><div class="card"><div class="list">' +
       S.projects.map((p) => {
         const st = projectStatus(p);
         const pct = Math.round(progress(p) * 100);
         return '<a class="li li-link proj-row" href="#/project/' + p.id + '"><div class="li-main"><div class="li-title">' + esc(p.name) + '</div><div class="li-sub">' + plural(crewsAt(p.id, t).length, "crew") + ' on site today<span class="show-sm">, ' + pct + "% done</span></div></div>" +
           '<div class="pr-bar">' + pbar(progress(p)) + '</div><span class="pr-pct num small">' + pct + '%</span><span class="pr-st">' + chip(st.label, st.cls) + "</span></a>";
-      }).join("") + "</div></div></div>";
+      }).join("") + "</div></div></div>");
   }
 
   function siteId() {
@@ -1573,9 +1551,8 @@
 
   const A = {
     "load-sample": loadSample,
-    "start-empty"() { S = window.SampleData.buildEmptyData(); save(); location.hash = "#/projects"; render(); toast("Empty app ready. Start by adding a project."); },
     "reset-sample"() { ui.menu = false; askConfirm("Reload sample data?", "This replaces everything on this device with fresh sample data.", "Reload", false, loadSample); },
-    wipe() { ui.menu = false; askConfirm("Clear everything?", "All projects, workers, photos and receipts on this device will be deleted. This cannot be undone.", "Delete everything", true, async () => { await PhotoDB.clear(); localStorage.removeItem(KEY); S = null; closeSheet(); location.hash = "#/today"; render(); }); },
+    wipe() { ui.menu = false; askConfirm("Clear everything and start empty?", "All projects, workers, photos and receipts on this device will be deleted, so you can enter your own. This cannot be undone.", "Delete everything", true, async () => { await PhotoDB.clear(); S = window.SampleData.buildEmptyData(); ui.open.clear(); ui.tile = {}; save(); closeSheet(); location.hash = "#/today"; render(); toast("Everything cleared. Start by adding a project under Projects."); }); },
     "confirm-yes"() { const fn = ui.sheet && ui.sheet.onYes; if (fn) fn(); },
     menu() { ui.menu = !ui.menu; renderTop(); },
     "close-sheet": closeSheet,
@@ -1989,9 +1966,12 @@
      9. Start
      ====================================================================== */
   load();
-  if (S) purgeOldPhotos();
+  const firstVisit = !S;
+  if (firstVisit) { S = window.SampleData.buildSampleData(); save(); }
+  purgeOldPhotos();
   enterRoute();
   render();
+  if (firstVisit) setTimeout(() => toast("This is sample data for GCL Builders. Switch “Viewing as” to see each role."), 600);
   // expose for debugging in the browser console
   window.SiteBook = { get data() { return S; }, calcHours, matchOf, render };
 })();

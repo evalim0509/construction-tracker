@@ -12,9 +12,13 @@ WhatsApp and Excel**, in plain English.
 
 **Live:** https://evalim0509.github.io/construction-tracker/
 
-Open the link and press **Try with sample data**. Then use **Viewing as** at
+Open the link. It starts on today's screen, filled with a sample company
+(GCL Builders), so you can try everything straight away. Use **Viewing as** at
 the top to switch between *Management*, *Site manager*, *Material buyer* and
 *Construction worker*.
+
+To enter your own data, open the **☰ menu → Clear everything, start empty**.
+**☰ → Reload sample data** brings the demo back.
 
 To run it on your own computer, download the repo and open `index.html` in a
 browser. No install needed.

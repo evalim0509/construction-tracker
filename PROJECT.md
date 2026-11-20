@@ -224,6 +224,13 @@ Site manager only worker has no phone                             → neutral, n
 
 ## 9. Change log
 
+### v0.3.1 — 20 Nov 2026 — opens straight on "Good morning"
+Client feedback: "I don't want the first page to be import data, I want it to be like Good morning xxx, here's today".
+- Removed the welcome screen ("Try with sample data / Start empty").
+- A first visit fills the app with the GCL Builders sample company and opens directly on the **Today** screen ("Good morning, Mr. Lim. Here is every site at a glance."). A short message says it's sample data and points to "Viewing as".
+- **☰ menu → Clear everything, start empty** wipes the sample data so a company can enter its own. The Today screen then shows "No projects yet" with an **Add a project** button.
+- **☰ menu → Reload sample data** brings the demo back.
+
 ### v0.3.0 — 20 Nov 2026 — categories everywhere, icon tiles, construction worker role
 Client feedback: "everything should have categories, I don't want long lists", "sections collapsed by default and shown as icons, no long tabs", "add a construction worker role, super simple, clock in with a photo, clock out, track salary; attendance counted by both worker and site manager for accuracy".
 - **Icon tiles** replace the long expand bars on the project page, site manager home, buyer home and Money page. Each tile shows an icon, one word and a number. All are closed at first. On a laptop the chosen tile opens under the row; on a phone it opens as a pop-up.
@@ -260,7 +267,7 @@ Client feedback: "bars should start on the same line", "calendar and side panel 
   - Sample data grows to 31 materials so the categories have real content.
 
 ### v0.1.0 — 17 Nov 2026 — first clickable prototype
-- Welcome screen with **Try with sample data** and **Start empty**.
+- Welcome screen with **Try with sample data** and **Start empty** (removed in v0.3.1).
 - Sample company GCL Builders: 5 projects, 5 crews, 50 workers, 2 weeks of attendance with demo selfies, 16 materials, buy list, receipts, bills and client payments, all relative to today's date.
 - **Today** screen for each role: management (3 numbers, 3D hero of the busiest site, needs your attention, 30-day cash), site manager (clocked-in count, Clock in/out, check attendance, materials this week, phases), buyer (to buy this week, low stock, delivery button).
 - **+ Log** button with 4 flows: clock in/out with photo, receipt or cash, material in/out, delay a job.

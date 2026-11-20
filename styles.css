@@ -387,15 +387,6 @@ textarea.input { min-height: 84px; resize: vertical; }
 .att-actions { display: flex; gap: 8px; }
 .att-actions .btn { flex: 1; }
 
-/* ---------- Welcome ---------- */
-.welcome { min-height: calc(100vh - 120px); display: grid; grid-template-columns: 1fr 1fr; gap: 32px; align-items: center; }
-.welcome h1 { font-size: clamp(36px, 5.4vw, 64px); font-weight: 400; letter-spacing: -.035em; line-height: 1.02; }
-.welcome p { color: var(--ink-2); font-size: 19px; margin-top: 18px; max-width: 34ch; }
-.welcome-list { list-style: none; padding: 0; margin: 24px 0 0; display: grid; gap: 10px; }
-.welcome-list li { display: flex; gap: 10px; align-items: center; color: var(--ink-2); }
-.welcome-list svg { width: 20px; height: 20px; color: var(--teal); flex: none; }
-.welcome .hero { min-height: 520px; }
-
 /* ---------- Toast ---------- */
 .toast {
   position: fixed; left: 50%; bottom: 28px; transform: translate(-50%, 20px); opacity: 0; pointer-events: none; z-index: 80;
@@ -607,15 +598,12 @@ details.fold.flat > summary { padding: 14px 16px; }
   .stat { display: flex; align-items: center; justify-content: space-between; padding: 16px 18px; }
   .stat-value { margin-top: 0; font-size: 30px; }
   .stat-foot { display: none; }
-  .grid-2, .grid-hero, .welcome { grid-template-columns: 1fr; }
+  .grid-2, .grid-hero { grid-template-columns: 1fr; }
   .hero { min-height: 420px; }
   .hero-foot .grow { min-width: 100%; }
   .hero-hint { display: none; }
   .toast { bottom: auto; top: 72px; transform: translate(-50%, -20px); }
   .toast.show { transform: translate(-50%, 0); }
-  .welcome { min-height: 0; padding-top: 8px; gap: 20px; }
-  .welcome .hero { min-height: 300px; order: -1; }
-  .welcome p { font-size: 17px; }
   .card { padding: 18px; }
   details.fold > summary { padding: 16px; gap: 12px; }
   .fold-body { padding: 0 16px 16px; }
