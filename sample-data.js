@@ -209,6 +209,15 @@
       disputes.push({ id: "ds2", workerId: missW.id, date: d3, projectId: "p1", reason: "Day missing", note: "I was on site but my phone battery died.", status: "open", at: new Date().toISOString() });
     }
 
+    // ---- notifications (what the site manager sees under the bell) ----
+    const notifications = [];
+    const todayIso = D(0);
+    attendance.filter((a) => a.date === todayIso && a.self && a.self.in && !a.in).forEach((a, i) => {
+      notifications.push({ id: "nt" + i, type: "selfie-in", to: "site", workerId: a.workerId, projectId: a.projectId, photo: a.self.inPhoto, date: todayIso, time: a.self.in, read: false, at: new Date().toISOString() });
+    });
+    disputes.forEach((d, i) => notifications.push({ id: "ntr" + i, type: "report", to: "site", workerId: d.workerId, projectId: d.projectId, text: d.reason + (d.note ? ", “" + d.note + "”" : ""), forDate: d.date, date: yd, time: "19:" + (10 + i * 7), read: false, at: new Date().toISOString() }));
+    notifications.sort((a, b) => (b.date + b.time).localeCompare(a.date + a.time));
+
     // ---- money ----
     const money = [];
     const mo = (o) => money.push(Object.assign({ id: "mo" + money.length, photo: null, supplier: "", ref: "", note: "", by: "boss" }, o));
@@ -276,7 +285,7 @@
       role: "boss",
       settings: { normalHours: 8, breakHours: 1, breakAfter: 5, otRate: 1.5, halfDayUnder: 5, photoKeepDays: 30, sundayOff: true, matchMinutes: 15, payDay: 7, geofenceM: 200 },
       flags: { privacySeen: false },
-      projects, crews, workers, assignments, materials, needs, moves, attendance, money, disputes
+      projects, crews, workers, assignments, materials, needs, moves, attendance, money, disputes, notifications
     };
   }
 
@@ -288,7 +297,7 @@
       role: "boss",
       settings: { normalHours: 8, breakHours: 1, breakAfter: 5, otRate: 1.5, halfDayUnder: 5, photoKeepDays: 30, sundayOff: true, matchMinutes: 15, payDay: 7, geofenceM: 200 },
       flags: { privacySeen: false },
-      projects: [], crews: [], workers: [], assignments: [], materials: [], needs: [], moves: [], attendance: [], money: [], disputes: []
+      projects: [], crews: [], workers: [], assignments: [], materials: [], needs: [], moves: [], attendance: [], money: [], disputes: [], notifications: []
     };
   }
 

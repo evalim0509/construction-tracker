@@ -617,7 +617,7 @@ button.chip:hover { text-decoration: underline; text-underline-offset: 3px; }
   .topnav a { padding: 9px 10px; border-radius: 6px; font-size: 15px; color: var(--ink-2); }
   .topnav a:hover { background: var(--bg); }
   .topnav a.on { background: var(--bg); color: var(--ink); font-weight: 600; }
-  .top-right { margin-top: auto; display: grid; grid-template-columns: 1fr auto; gap: 8px; position: relative; }
+  .top-right { margin-top: auto; display: grid; grid-template-columns: 1fr auto auto; gap: 8px; position: relative; }
   .top-right .role-pick { grid-column: 1 / -1; }
   .role-pick select { width: 100%; min-width: 0; }
   .log-btn-top { width: 100%; }
@@ -625,6 +625,32 @@ button.chip:hover { text-decoration: underline; text-underline-offset: 3px; }
   main { margin: 0 0 0 var(--side-w); max-width: 1240px; padding: 16px 40px 64px; }
   .day-panel { top: 24px; }
 }
+
+
+/* ---------- Notifications, selfie banner, attendance filters (v0.4.1) ---------- */
+.bell-btn { position: relative; }
+.bell-n { position: absolute; top: 4px; right: 4px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--red); color: #fff; font-size: 11px; font-weight: 600; display: grid; place-items: center; line-height: 1; box-shadow: 0 0 0 2px var(--page); }
+.note { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; border: 0; background: none; padding: 12px 8px; border-top: 1px solid var(--line); border-radius: 6px; }
+.note:first-child { border-top: 0; }
+.note:hover { background: var(--bg); }
+.note.unread { background: var(--blue-soft); }
+.note-t { display: block; font-size: 15px; line-height: 1.35; }
+.note-t b { font-weight: 600; }
+.banner { display: flex; align-items: center; gap: 14px; padding: 14px 16px; margin-bottom: 16px; border-radius: 8px; background: var(--blue-soft); box-shadow: 0 0 0 1px #D6DFEA; }
+.banner b { font-weight: 600; }
+.banner-pics { display: flex; flex: none; }
+.banner-pics img, .banner-pics .photo-missing { width: 40px; height: 40px; border-radius: 6px; object-fit: cover; box-shadow: 0 0 0 2px var(--blue-soft); margin-left: -10px; background: var(--bg); }
+.banner-pics > :first-child { margin-left: 0; }
+.att-f { border: 0; background: none; padding: 6px 10px; margin: -6px -4px; border-radius: 6px; display: inline-flex; align-items: baseline; gap: 0; text-align: left; color: inherit; }
+.att-f:hover { background: var(--bg); }
+.att-f.on { background: var(--ink); color: #fff; }
+.att-f.on span { color: #C9D2D9; }
+.att-f.on b.warn { color: #F2B36B; }
+.att-card.focus { box-shadow: 0 0 0 2px var(--blue); }
+.w-today { margin-top: 12px; }
+.w-today-head { font-weight: 600; margin-bottom: 10px; }
+.w-today .w-status { margin-top: 12px; }
+.w-today .att-photos figure { width: min(48%, 180px); }
 
 /* ---------- Bottom nav (phones) ---------- */
 .bottomnav { display: none; }
@@ -696,6 +722,13 @@ button.chip:hover { text-decoration: underline; text-underline-offset: 3px; }
   .cal-month { min-width: 0; font-size: 18px; }
   .day-panel { margin-top: 0; }
   .mobile-only { display: flex !important; }
+  .banner { flex-wrap: wrap; }
+  .banner .btn { width: 100%; }
+  .icon-btn { width: 40px; height: 40px; }
+  .topbar .top-right { gap: 6px; }
+  .role-pick select { max-width: 132px; }
+  .log-btn-top { padding: 0 12px 0 10px; }
+
   .tiles { gap: 22px; margin: 0 -16px; padding: 0 16px; }
   .qr-wrap { grid-template-columns: 1fr; }
   .qr-box { max-width: 260px; margin: 0 auto; }

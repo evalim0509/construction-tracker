@@ -199,6 +199,7 @@ attendance   id, workerId, projectId, date,
              self{in, out, inPhoto, outPhoto, inLoc} (worker's own phone; second count)
              status(waiting|approved|rejected), adjust{normal,ot,half,reason}
 disputes     id, workerId, date, projectId, reason, note, status(open|sorted)
+notifications id, type(selfie-in|selfie-out|report|confirmed), to(site|worker), workerId, projectId, photo, date, time, read
 materials    id, name, unit, qty (in yard), min, cat (category; guessed from the name if missing)
 needs        id, projectId, materialId, qty, by, status(to buy|ordered|arrived)
 moves        id, date, materialId, qty, kind(in|out|direct), projectId
@@ -240,6 +241,20 @@ Site manager only worker has no phone                             → neutral, n
 10. **e-Invoicing (LHDN MyInvois)** is being phased in. Accountants will ask for supplier TIN and e-invoice numbers. Plan fields for it before production.
 
 ## 9. Change log
+
+### v0.4.1 — 20 Nov 2026 — worker selfies show up straight away, notifications
+Client feedback: "after I take the selfie to clock in it doesn't appear anywhere; only after clock out does it appear for the site manager. I want the clock-in selfie to show for both the worker and the site manager, with a notification, and a filter to see who took a selfie."
+- **Bug fixed:** Check attendance used to open on the latest day with *finished* records (usually yesterday), so a worker who had only clocked in was not visible. It now opens on **today** whenever anyone clocked in today.
+- **Worker screen:** a new **Today** card shows the worker's own clock-in selfie and time, then the clock-out selfie, with "Waiting for site manager to confirm" or "Site manager confirmed 08:03". Translated into all 6 worker languages (drafts).
+- **Notifications (bell with a red count)** for the site manager and management:
+  - "Agus Santoso clocked in with a selfie at 07:58, Shah Alam Factory" (with the selfie), the same for clock-out, and worker reports.
+  - Tapping one opens Check attendance on that day, filtered, with that worker's card first and outlined.
+  - Workers get a notification when the site manager confirms them.
+  - Switching "Viewing as" says how many new notifications are waiting.
+- **Site manager Today screen:** a banner "4 workers clocked in with a selfie" with their photos and a **Review** button.
+- **Check attendance filters:** the numbers at the top are now buttons: *clocked in*, *took a selfie*, *waiting for you*, *to look at*, *did not clock in*.
+- Cards waiting for the site manager have their own **Confirm** / **Confirm out** button. Selfie times are labelled "In 07:58, selfie".
+- A worker who clocks in on their own phone is automatically marked as having a phone.
 
 ### v0.4.0 — 20 Nov 2026 — professional look
 Client feedback: "rounded corners, bright colours and 3D looks make it look like a kids app; I don't feel professionalism and serious business". Each change was shown as a before/after image and approved one by one (V1 to V10 in section 6).

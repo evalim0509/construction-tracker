@@ -105,6 +105,7 @@
     chart: '<path d="M3 3v18h18"/><path d="M18 17V9M13 17V5M8 17v-3"/>',
     flag: '<path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1zM4 22v-7"/>',
     qr: '<rect width="5" height="5" x="3" y="3" rx="1"/><rect width="5" height="5" x="16" y="3" rx="1"/><rect width="5" height="5" x="3" y="16" rx="1"/><path d="M21 16h-3a2 2 0 0 0-2 2v3M21 21v.01M12 7v3a2 2 0 0 1-2 2H7M3 12h.01M12 3h.01M12 16v.01M16 12h1M21 12v.01M12 21v-1"/>',
+    bell: '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.94 1.94 0 0 0 3.4 0"/>',
     globe: '<circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20M2 12h20"/>',
     logo: '<path d="M5 20V11l5 3.4V11l5 3.4V6h4v14z" fill="#fff" stroke="none"/>'
   };
@@ -123,6 +124,7 @@
   // fill in fields added in later versions, so older saved data keeps working
   function migrate() {
     S.disputes = S.disputes || [];
+    S.notifications = S.notifications || [];
     S.people.worker = S.people.worker || { siteId: null, workerId: null, lang: "en" };
     S.settings = Object.assign({ matchMinutes: 15, payDay: 7, geofenceM: 200 }, S.settings);
   }
@@ -329,7 +331,7 @@
     const w = worker(r.workerId), s = r.self || {};
     const tol = S.settings.matchMinutes || 15;
     if (!s.in && !hasPhone(w)) return { key: "single", label: "Site manager only", cls: "" };
-    if (s.in && !r.in) return { key: "worker", label: "Only worker clocked in", cls: "warn", flag: true };
+    if (s.in && !r.in) return { key: "worker", label: r.date === today() ? "Selfie in, waiting for you" : "Site manager did not confirm", cls: "warn", flag: true };
     if (r.in && !s.in) return { key: "manager", label: "Worker did not clock in", cls: "warn", flag: true };
     const d1 = Math.abs(toMin(r.in) - toMin(s.in));
     const d2 = r.out && s.out ? Math.abs(toMin(r.out) - toMin(s.out)) : 0;
@@ -337,6 +339,15 @@
     if (r.date < today() && !!r.out !== !!s.out) return { key: "out", label: "Clock-out on one side only", cls: "warn", flag: true };
     return { key: "ok", label: "Matched", cls: "good" };
   }
+  // Notifications: to "site" (site manager + management) or to "worker" (one worker)
+  function notify(n) { S.notifications.unshift(Object.assign({ id: uid("nt"), at: new Date().toISOString(), date: today(), time: nowHM(), read: false }, n)); if (S.notifications.length > 200) S.notifications.length = 200; }
+  function myNotes() {
+    if (role() === "worker") { const w = me(); return w ? S.notifications.filter((n) => n.to === "worker" && n.workerId === w.id) : []; }
+    if (role() === "site") { const sid = siteId(); return S.notifications.filter((n) => n.to === "site" && n.projectId === sid); }
+    if (role() === "boss") return S.notifications.filter((n) => n.to === "site");
+    return [];
+  }
+  const unreadCount = () => myNotes().filter((n) => !n.read).length;
   const openDispute = (workerId, date) => S.disputes.find((d) => d.status === "open" && d.workerId === workerId && d.date === date);
 
   /* hours: automatic first, site manager's change wins */
@@ -445,6 +456,7 @@
       Object.keys(ROLE_LABEL).map((k) => '<option value="' + k + '"' + (S.role === k ? " selected" : "") + ">" + ROLE_LABEL[k] + "</option>").join("") +
       "</select></div>" +
       (isW ? "" : '<button class="btn btn-primary log-btn log-btn-top" data-action="open-log">' + icon("plus") + "Log</button>") +
+      (role() === "buyer" ? "" : '<button class="icon-btn bell-btn" data-action="open-notes" aria-label="Notifications' + (unreadCount() ? ", " + unreadCount() + " new" : "") + '">' + icon("bell") + (unreadCount() ? '<span class="bell-n">' + Math.min(99, unreadCount()) + "</span>" : "") + "</button>") +
       '<button class="icon-btn" data-action="menu" aria-label="More options" aria-expanded="' + ui.menu + '">' + icon("menu") + "</button>" +
       (ui.menu ? menuHTML() : "") +
       "</div>";
@@ -643,7 +655,8 @@
       return '<div class="li">' + avatar(w, r.self.inPhoto) + '<div class="li-main"><div class="li-title">' + esc(w.name) + '</div><div class="li-sub">Clocked ' + (outSide ? "out" : "in") + " on own phone at " + esc(outSide ? r.self.out : r.self.in) + '</div></div><button class="btn btn-sm btn-primary" data-action="clock-confirm" data-id="' + r.id + '" data-act="' + (outSide ? "out" : "in") + '">' + icon("check") + "Confirm</button></div>";
     }).join("") + '</div><button class="btn btn-soft mt-12" data-action="confirm-all" data-site="' + sid + '">' + icon("check") + "Confirm all " + toConfirm.length + "</button>" : empty("Nobody waiting. When a worker clocks in on their own phone, they show up here.");
 
-    return head +
+    const banner = toConfirm.length ? '<div class="banner"><div class="banner-pics">' + toConfirm.slice(0, 4).map((r) => img(r.self.out && r.in ? r.self.outPhoto : r.self.inPhoto, "", worker(r.workerId).name)).join("") + '</div><div class="grow"><b>' + plural(toConfirm.length, "worker") + " clocked " + (toConfirm.every((r) => r.in) ? "out" : "in") + ' with a selfie</b><div class="small muted">' + esc(toConfirm.slice(0, 3).map((r) => worker(r.workerId).name.split(" ")[0]).join(", ")) + (toConfirm.length > 3 ? " and " + (toConfirm.length - 3) + " more" : "") + ' are waiting for you to confirm.</div></div><button class="btn btn-primary btn-sm" data-action="att-review" data-site="' + sid + '">Review</button></div>' : "";
+    return head + banner +
       '<div class="grid-hero">' +
       '<div class="card" style="padding:28px"><div class="muted">Today at ' + esc(p.name) + "</div>" +
       '<div class="row" style="align-items:baseline;gap:10px;margin-top:6px"><span class="num" style="font-size:48px;font-weight:500;letter-spacing:-.02em;line-height:1">' + recs.length + '</span><span class="muted" style="font-size:22px">of ' + expected.length + "</span></div>" +
@@ -1097,7 +1110,12 @@
     return Object.keys(m).sort().map((d) => ({ d, n: m[d] }));
   }
   function defaultAttSite() { return role() === "site" ? siteId() : (activeProjects()[0] || S.projects[0] || {}).id; }
-  function pickAttDate(sid) { const w = waitingDays(sid); return w.length ? w[w.length - 1].d : today(); }
+  // open on today whenever anyone clocked in today; otherwise the latest day still waiting for a check
+  function pickAttDate(sid) {
+    if (S.attendance.some((a) => a.projectId === sid && a.date === today())) return today();
+    const w = waitingDays(sid); return w.length ? w[w.length - 1].d : today();
+  }
+  const needsConfirm = (r) => !!(r.self && ((r.self.in && !r.in) || (r.self.out && r.in && !r.out)));
 
   function attCard(r) {
     const w = worker(r.workerId); if (!w) return "";
@@ -1108,14 +1126,15 @@
     const dsp = openDispute(r.workerId, r.date);
     const both = s.in && r.in;
     const times = both && mt.key === "diff" ? '<div class="tiny muted">In: worker ' + esc(s.in) + ", site manager " + esc(r.in) + (s.out || r.out ? ". Out: worker " + esc(s.out || "–") + ", site manager " + esc(r.out || "–") : "") + ".</div>" : "";
-    return '<div class="att-card ' + r.status + (mt.flag && r.status === "waiting" ? " flagged" : "") + '"><div class="row-between"><div class="li-main"><div class="li-title">' + esc(w.name) + '</div>' + (hasPhone(w) ? "" : '<div class="li-sub">No phone</div>') + "</div>" + st + "</div>" +
+    return '<div class="att-card ' + r.status + (mt.flag && r.status === "waiting" ? " flagged" : "") + (ui.attFocus === r.workerId ? " focus" : "") + '"><div class="row-between"><div class="li-main"><div class="li-title">' + esc(w.name) + '</div>' + (hasPhone(w) ? "" : '<div class="li-sub">No phone</div>') + "</div>" + st + "</div>" +
       '<div class="row wrap" style="gap:6px">' + chip(mt.label, mt.cls, mt.key === "ok" ? "check" : mt.flag ? "alert" : "") + (dsp ? chip("Worker report", "warn", "flag") : "") + "</div>" +
-      '<div class="att-photos"><figure>' + img(e.inPhoto, "", w.name + " clock in") + "<figcaption>In " + esc(e.in || "") + "</figcaption></figure><figure>" + (done ? img(e.outPhoto, "", w.name + " clock out") : '<div class="photo-missing">Not out yet</div>') + "<figcaption>" + (done ? "Out " + esc(e.out) : "&nbsp;") + "</figcaption></figure></div>" +
+      '<div class="att-photos"><figure>' + img(e.inPhoto, "", w.name + " clock in") + "<figcaption>In " + esc(e.in || "") + (s.in && !r.in ? ", selfie" : "") + "</figcaption></figure><figure>" + (done ? img(e.outPhoto, "", w.name + " clock out") : '<div class="photo-missing">Not out yet</div>') + "<figcaption>" + (done ? "Out " + esc(e.out) + (s.out && !r.out ? ", selfie" : "") : "&nbsp;") + "</figcaption></figure></div>" +
       times +
       '<div class="row-between wrap"><div class="att-hours">' + esc(hoursText(h)) + (h && h.changed ? ' <span class="chip info" title="' + esc(r.adjust.reason || "") + '">Changed by site manager</span>' : h && !h.open ? ' <span class="muted small">(automatic)</span>' : "") + "</div>" + pay + "</div>" +
       (dsp ? '<div class="report">' + icon("flag") + "<div><b>" + esc(w.name.split(" ")[0]) + " says: " + esc(dsp.reason) + "</b>" + (dsp.note ? "<br>“" + esc(dsp.note) + "”" : "") + "</div>" + (can.approve() ? '<button class="btn btn-sm" data-action="dispute-done" data-id="' + dsp.id + '">Sorted</button>' : "") + "</div>" : "") +
       (r.note ? '<div class="small muted">' + esc(r.note) + "</div>" : "") +
-      (can.approve() ? '<div class="att-actions">' + (r.status !== "approved" ? '<button class="btn btn-sm btn-primary" data-action="att-ok" data-id="' + r.id + '"' + (!done ? " disabled" : "") + ">" + icon("check") + "Approve</button>" : "") +
+      (can.approve() ? '<div class="att-actions">' + (needsConfirm(r) && r.date === today() ? '<button class="btn btn-sm btn-primary" data-action="clock-confirm" data-id="' + r.id + '" data-act="' + (r.in ? "out" : "in") + '">' + icon("check") + (r.in ? "Confirm out" : "Confirm") + "</button>" :
+        r.status !== "approved" ? '<button class="btn btn-sm btn-primary" data-action="att-ok" data-id="' + r.id + '"' + (!done ? " disabled" : "") + ">" + icon("check") + "Approve</button>" : "") +
         '<button class="btn btn-sm btn-soft" data-action="att-edit" data-id="' + r.id + '">' + icon("edit") + "Change</button>" +
         (r.status !== "rejected" ? '<button class="btn btn-sm btn-danger" data-action="att-no" data-id="' + r.id + '" aria-label="Reject">' + icon("x") + "</button>" : "") + "</div>" : "") +
       "</div>";
@@ -1127,7 +1146,8 @@
     const d = ui.attDate;
     const p = project(sid);
     const order = (r) => (r.status === "waiting" && matchOf(r).flag ? 0 : r.status === "waiting" && isDone(r) ? 1 : r.status === "waiting" ? 2 : r.status === "approved" ? 3 : 4);
-    const recs = S.attendance.filter((a) => a.projectId === sid && a.date === d).sort((a, b) => order(a) - order(b));
+    const focus = (r) => (ui.attFocus && r.workerId === ui.attFocus ? -1 : 0);
+    const recs = S.attendance.filter((a) => a.projectId === sid && a.date === d).sort((a, b) => focus(a) - focus(b) || order(a) - order(b));
     const expected = expectedWorkers(sid, d);
     const missing = expected.filter((w) => !recs.some((r) => r.workerId === w.id));
     const waiting = recs.filter((r) => r.status === "waiting" && isDone(r));
@@ -1137,6 +1157,20 @@
     const sitePick = '<select class="input pill-select" data-change="attSite" aria-label="Site">' + S.projects.map((x) => '<option value="' + x.id + '"' + (x.id === sid ? " selected" : "") + ">" + esc(x.name) + "</option>").join("") + "</select>";
     const nav = '<div class="cal-head"><button class="icon-btn" data-action="att-day" data-step="-1" aria-label="Previous day">' + icon("left") + '</button><div class="cal-month" style="min-width:150px">' + (d === today() ? "Today" : fmtDay(d)) + '</div><button class="icon-btn" data-action="att-day" data-step="1" aria-label="Next day"' + (d >= today() ? " disabled" : "") + ">" + icon("right") + "</button></div>";
     const otherReports = S.disputes.filter((x) => x.status === "open" && x.projectId === sid && x.date !== d);
+
+    // filters (the numbers at the top are buttons)
+    const F_ = {
+      all: { label: "clocked in", list: recs },
+      selfie: { label: "took a selfie", list: recs.filter((r) => r.self && r.self.in) },
+      confirm: { label: "waiting for you", list: recs.filter(needsConfirm) },
+      look: { label: "to look at", list: flagged, warn: true },
+      missing: { label: "did not clock in", list: missing }
+    };
+    const fk = F_[ui.attFilter] ? ui.attFilter : "all";
+    const filterBar = '<div class="card att-sum">' + Object.keys(F_).map((k) => '<button class="att-f' + (fk === k ? " on" : "") + '" data-action="att-filter" data-f="' + k + '"><b class="num' + (F_[k].warn && F_[k].list.length ? " warn" : "") + '">' + F_[k].list.length + "</b><span>" + F_[k].label + "</span></button>").join("") +
+      (can.seePay() ? '<div class="grow" style="text-align:right"><span class="muted">Wages for the day</span> <b class="num" style="font-weight:500;font-size:18px">' + RM(Math.round(sum(recs.filter((r) => r.status === "approved"), payFor))) + "</b></div>" : "") + "</div>";
+    const missingRow = (w) => { const dsp = openDispute(w.id, d); return '<div class="li">' + avatar(w) + '<div class="li-main"><div class="li-title">' + esc(w.name) + '</div><div class="li-sub">' + esc(crew(w.crewId) ? crew(w.crewId).name : "") + (dsp ? ', <span style="color:#7A4E18">reported: ' + esc(dsp.reason) + (dsp.note ? ", “" + esc(dsp.note) + "”" : "") + "</span>" : "") + "</div></div>" + (can.approve() ? '<button class="btn btn-sm btn-soft" data-action="att-add" data-w="' + w.id + '">Add by hand</button>' : "") + "</div>"; };
+    const filtered = fk === "all" ? null : fk === "missing" ? (missing.length ? '<div class="card"><div class="list">' + missing.map(missingRow).join("") + "</div></div>" : "") : (F_[fk].list.length ? '<div class="att-grid">' + F_[fk].list.map(attCard).join("") + "</div>" : "");
 
     // one folder per crew
     const crewIds = Array.from(new Set(recs.map((r) => (worker(r.workerId) || {}).crewId).concat(missing.map((w) => w.crewId)))).filter(Boolean);
@@ -1156,21 +1190,21 @@
       '<div class="row-between wrap" style="margin-bottom:16px">' + nav + sitePick + "</div>" +
       (waitingDays(sid).filter((x) => x.d !== d).length ? '<div class="wait-days small"><span class="muted">Also waiting for a check:</span>' + waitingDays(sid).filter((x) => x.d !== d).map((x) => '<button class="chip warn" data-action="att-goto" data-d="' + x.d + '">' + fmtDay(x.d) + " (" + x.n + ")</button>").join("") + "</div>" : "") +
       (otherReports.length ? '<div class="wait-days small"><span class="muted">Worker reports on other days:</span>' + otherReports.map((x) => '<button class="chip warn" data-action="att-goto" data-d="' + x.date + '">' + icon("flag") + fmtDay(x.date) + "</button>").join("") + "</div>" : "") +
-      (p ? '<div class="card att-sum"><div><b class="num">' + recs.length + '</b><span>clocked in</span></div><div><b class="num">' + approved + '</b><span>approved</span></div><div><b class="num">' + easy.length + '</b><span>matched, waiting</span></div><div><b class="num' + (flagged.length ? " warn" : "") + '">' + flagged.length + '</b><span>to look at</span></div><div><b class="num">' + missing.length + '</b><span>did not clock in</span></div>' +
-        (can.seePay() ? '<div class="grow" style="text-align:right"><span class="muted">Wages for the day</span> <b class="num" style="font-weight:500;font-size:18px">' + RM(Math.round(sum(recs.filter((r) => r.status === "approved"), payFor))) + "</b></div>" : "") + "</div>" : "") +
-      (groups || '<div class="card">' + empty(isSunday(d) ? "Sunday. Rest day." : "Nobody clocked in at this site on this day.") + "</div>");
+      (p ? filterBar : "") +
+      (filtered !== null ? (filtered || '<div class="card">' + empty("Nobody here right now. Tap “clocked in” to see everyone.") + "</div>") :
+        (groups || '<div class="card">' + empty(isSunday(d) ? "Sunday. Rest day." : "Nobody clocked in at this site on this day.") + "</div>"));
   }
 
   /* ---------- Construction worker (own phone) ---------- */
   // Worker screen words. Everything except English is a DRAFT: a native speaker must check it before real use.
   const LANGS = { en: "English", ms: "Bahasa Malaysia", bn: "বাংলা (Bengali)", ne: "नेपाली (Nepali)", id: "Bahasa Indonesia", my: "မြန်မာ (Burmese)" };
   const T = {
-    en: { hi: "Hi", clockIn: "Clock in", clockOut: "Clock out", inSince: "In since", doneToday: "Done for today", confirmed: "Site manager confirmed", waitingConfirm: "Waiting for site manager to confirm", tomorrow: "Tomorrow", restDay: "Rest day", noJob: "Not booked yet", myPay: "My pay this month", days: "days", ot: "OT", checked: "checked", waiting: "waiting", dayRate: "Day rate", otRate: "OT per hour", payDay: "Pay day", myDays: "My days", wrong: "Something wrong? Tell site manager", takePhoto: "Take a selfie", confirm: "Confirm", retake: "Retake", onSite: "You are at the site", notOnSite: "You are not at the site. Go to the site to clock in.", send: "Send", whichDay: "Which day?", whatsWrong: "What is wrong?", wrongTime: "Wrong time", missingDay: "Day missing", wrongOT: "Wrong OT", other: "Other", sent: "Sent to site manager", language: "Language", scanQR: "Scan the QR code at the site gate", scan: "Scan QR code", whoAreYou: "Who are you?", notYou: "Not you?", approved: "Checked", rejected: "Not paid", hours: "hours", note: "Tell us more (optional)", noDays: "No days yet this month." },
-    ms: { hi: "Hai", clockIn: "Masuk kerja", clockOut: "Keluar kerja", inSince: "Masuk sejak", doneToday: "Selesai hari ini", confirmed: "Disahkan oleh pengurus tapak", waitingConfirm: "Menunggu pengesahan pengurus tapak", tomorrow: "Esok", restDay: "Hari rehat", noJob: "Belum dijadualkan", myPay: "Gaji saya bulan ini", days: "hari", ot: "OT", checked: "disahkan", waiting: "menunggu", dayRate: "Kadar harian", otRate: "OT sejam", payDay: "Hari gaji", myDays: "Hari kerja saya", wrong: "Ada masalah? Beritahu pengurus tapak", takePhoto: "Ambil swafoto", confirm: "Sahkan", retake: "Ambil semula", onSite: "Anda berada di tapak", notOnSite: "Anda tiada di tapak. Pergi ke tapak untuk masuk kerja.", send: "Hantar", whichDay: "Hari apa?", whatsWrong: "Apa masalahnya?", wrongTime: "Masa salah", missingDay: "Hari tiada", wrongOT: "OT salah", other: "Lain-lain", sent: "Dihantar kepada pengurus tapak", language: "Bahasa", scanQR: "Imbas kod QR di pintu masuk tapak", scan: "Imbas kod QR", whoAreYou: "Siapa anda?", notYou: "Bukan anda?", approved: "Disahkan", rejected: "Tidak dibayar", hours: "jam", note: "Ceritakan lagi (pilihan)", noDays: "Belum ada hari kerja bulan ini." },
-    id: { hi: "Halo", clockIn: "Absen masuk", clockOut: "Absen pulang", inSince: "Masuk sejak", doneToday: "Selesai hari ini", confirmed: "Dikonfirmasi manajer lapangan", waitingConfirm: "Menunggu konfirmasi manajer lapangan", tomorrow: "Besok", restDay: "Hari libur", noJob: "Belum dijadwalkan", myPay: "Gaji saya bulan ini", days: "hari", ot: "lembur", checked: "dikonfirmasi", waiting: "menunggu", dayRate: "Upah harian", otRate: "Lembur per jam", payDay: "Hari gajian", myDays: "Hari kerja saya", wrong: "Ada yang salah? Beri tahu manajer lapangan", takePhoto: "Ambil swafoto", confirm: "Konfirmasi", retake: "Ulangi", onSite: "Anda berada di lokasi", notOnSite: "Anda tidak di lokasi. Pergi ke lokasi untuk absen.", send: "Kirim", whichDay: "Hari apa?", whatsWrong: "Apa yang salah?", wrongTime: "Jam salah", missingDay: "Hari hilang", wrongOT: "Lembur salah", other: "Lainnya", sent: "Terkirim ke manajer lapangan", language: "Bahasa", scanQR: "Pindai kode QR di gerbang lokasi", scan: "Pindai kode QR", whoAreYou: "Siapa Anda?", notYou: "Bukan Anda?", approved: "Dikonfirmasi", rejected: "Tidak dibayar", hours: "jam", note: "Ceritakan lebih lanjut (opsional)", noDays: "Belum ada hari kerja bulan ini." },
-    bn: { hi: "হ্যালো", clockIn: "কাজ শুরু", clockOut: "কাজ শেষ", inSince: "শুরু হয়েছে", doneToday: "আজকের কাজ শেষ", confirmed: "সাইট ম্যানেজার নিশ্চিত করেছেন", waitingConfirm: "সাইট ম্যানেজারের নিশ্চিতকরণের অপেক্ষায়", tomorrow: "আগামীকাল", restDay: "ছুটির দিন", noJob: "এখনও ঠিক হয়নি", myPay: "এই মাসে আমার বেতন", days: "দিন", ot: "ওভারটাইম", checked: "নিশ্চিত", waiting: "অপেক্ষায়", dayRate: "দৈনিক মজুরি", otRate: "প্রতি ঘণ্টা ওভারটাইম", payDay: "বেতনের দিন", myDays: "আমার কাজের দিন", wrong: "কিছু ভুল? সাইট ম্যানেজারকে জানান", takePhoto: "সেলফি তুলুন", confirm: "নিশ্চিত করুন", retake: "আবার তুলুন", onSite: "আপনি সাইটে আছেন", notOnSite: "আপনি সাইটে নেই। কাজ শুরু করতে সাইটে যান।", send: "পাঠান", whichDay: "কোন দিন?", whatsWrong: "কী ভুল?", wrongTime: "সময় ভুল", missingDay: "দিন বাদ পড়েছে", wrongOT: "ওভারটাইম ভুল", other: "অন্যান্য", sent: "সাইট ম্যানেজারকে পাঠানো হয়েছে", language: "ভাষা", scanQR: "সাইটের গেটে QR কোড স্ক্যান করুন", scan: "QR কোড স্ক্যান করুন", whoAreYou: "আপনি কে?", notYou: "আপনি নন?", approved: "নিশ্চিত", rejected: "বেতন হবে না", hours: "ঘণ্টা", note: "আরও বলুন (ঐচ্ছিক)", noDays: "এই মাসে এখনও কোনো দিন নেই।" },
-    ne: { hi: "नमस्ते", clockIn: "काम सुरु", clockOut: "काम सकियो", inSince: "सुरु भएको", doneToday: "आजको काम सकियो", confirmed: "साइट म्यानेजरले पुष्टि गर्नुभयो", waitingConfirm: "साइट म्यानेजरको पुष्टिको पर्खाइमा", tomorrow: "भोलि", restDay: "बिदाको दिन", noJob: "अझै तय भएको छैन", myPay: "यो महिनाको मेरो तलब", days: "दिन", ot: "ओभरटाइम", checked: "पुष्टि भयो", waiting: "पर्खाइमा", dayRate: "दैनिक ज्याला", otRate: "प्रति घण्टा ओभरटाइम", payDay: "तलब आउने दिन", myDays: "मेरा कामका दिन", wrong: "केही गलत छ? साइट म्यानेजरलाई भन्नुहोस्", takePhoto: "सेल्फी खिच्नुहोस्", confirm: "पुष्टि गर्नुहोस्", retake: "फेरि खिच्नुहोस्", onSite: "तपाईं साइटमा हुनुहुन्छ", notOnSite: "तपाईं साइटमा हुनुहुन्न। काम सुरु गर्न साइटमा जानुहोस्।", send: "पठाउनुहोस्", whichDay: "कुन दिन?", whatsWrong: "के गलत छ?", wrongTime: "समय गलत", missingDay: "दिन छुट्यो", wrongOT: "ओभरटाइम गलत", other: "अन्य", sent: "साइट म्यानेजरलाई पठाइयो", language: "भाषा", scanQR: "साइटको गेटमा QR कोड स्क्यान गर्नुहोस्", scan: "QR कोड स्क्यान गर्नुहोस्", whoAreYou: "तपाईं को हो?", notYou: "तपाईं होइन?", approved: "पुष्टि भयो", rejected: "तलब हुँदैन", hours: "घण्टा", note: "थप भन्नुहोस् (ऐच्छिक)", noDays: "यो महिना अझै कुनै दिन छैन।" },
-    my: { hi: "မင်္ဂလာပါ", clockIn: "အလုပ်ဝင်", clockOut: "အလုပ်ဆင်း", inSince: "ဝင်ချိန်", doneToday: "ဒီနေ့ အလုပ်ပြီးပါပြီ", confirmed: "ဆိုက်မန်နေဂျာ အတည်ပြုပြီး", waitingConfirm: "ဆိုက်မန်နေဂျာ အတည်ပြုရန် စောင့်နေသည်", tomorrow: "မနက်ဖြန်", restDay: "အနားယူရက်", noJob: "မသတ်မှတ်ရသေး", myPay: "ဒီလ ကျွန်ုပ်၏ လစာ", days: "ရက်", ot: "အချိန်ပို", checked: "အတည်ပြုပြီး", waiting: "စောင့်ဆိုင်းဆဲ", dayRate: "နေ့စား လုပ်ခ", otRate: "တစ်နာရီ အချိန်ပိုခ", payDay: "လစာထုတ်ရက်", myDays: "ကျွန်ုပ်၏ အလုပ်ရက်များ", wrong: "မှားနေလား? ဆိုက်မန်နေဂျာကို ပြောပါ", takePhoto: "ဆယ်လ်ဖီ ရိုက်ပါ", confirm: "အတည်ပြုပါ", retake: "ပြန်ရိုက်ပါ", onSite: "သင် ဆိုက်တွင် ရှိနေသည်", notOnSite: "သင် ဆိုက်တွင် မရှိပါ။ အလုပ်ဝင်ရန် ဆိုက်သို့ သွားပါ။", send: "ပို့ပါ", whichDay: "ဘယ်နေ့လဲ?", whatsWrong: "ဘာမှားနေလဲ?", wrongTime: "အချိန် မှားသည်", missingDay: "ရက် ကျန်နေသည်", wrongOT: "အချိန်ပို မှားသည်", other: "အခြား", sent: "ဆိုက်မန်နေဂျာထံ ပို့ပြီးပါပြီ", language: "ဘာသာစကား", scanQR: "ဆိုက်ဂိတ်ရှိ QR ကုဒ်ကို စကင်ဖတ်ပါ", scan: "QR ကုဒ် စကင်ဖတ်ပါ", whoAreYou: "သင် ဘယ်သူလဲ?", notYou: "သင် မဟုတ်ဘူးလား?", approved: "အတည်ပြုပြီး", rejected: "လစာ မရ", hours: "နာရီ", note: "ထပ်ပြောပါ (မဖြစ်မနေမဟုတ်)", noDays: "ဒီလ အလုပ်ရက် မရှိသေးပါ။" }
+    en: { today: "Today", notYet: "Not yet", hi: "Hi", clockIn: "Clock in", clockOut: "Clock out", inSince: "In since", doneToday: "Done for today", confirmed: "Site manager confirmed", waitingConfirm: "Waiting for site manager to confirm", tomorrow: "Tomorrow", restDay: "Rest day", noJob: "Not booked yet", myPay: "My pay this month", days: "days", ot: "OT", checked: "checked", waiting: "waiting", dayRate: "Day rate", otRate: "OT per hour", payDay: "Pay day", myDays: "My days", wrong: "Something wrong? Tell site manager", takePhoto: "Take a selfie", confirm: "Confirm", retake: "Retake", onSite: "You are at the site", notOnSite: "You are not at the site. Go to the site to clock in.", send: "Send", whichDay: "Which day?", whatsWrong: "What is wrong?", wrongTime: "Wrong time", missingDay: "Day missing", wrongOT: "Wrong OT", other: "Other", sent: "Sent to site manager", language: "Language", scanQR: "Scan the QR code at the site gate", scan: "Scan QR code", whoAreYou: "Who are you?", notYou: "Not you?", approved: "Checked", rejected: "Not paid", hours: "hours", note: "Tell us more (optional)", noDays: "No days yet this month." },
+    ms: { today: "Hari ini", notYet: "Belum", hi: "Hai", clockIn: "Masuk kerja", clockOut: "Keluar kerja", inSince: "Masuk sejak", doneToday: "Selesai hari ini", confirmed: "Disahkan oleh pengurus tapak", waitingConfirm: "Menunggu pengesahan pengurus tapak", tomorrow: "Esok", restDay: "Hari rehat", noJob: "Belum dijadualkan", myPay: "Gaji saya bulan ini", days: "hari", ot: "OT", checked: "disahkan", waiting: "menunggu", dayRate: "Kadar harian", otRate: "OT sejam", payDay: "Hari gaji", myDays: "Hari kerja saya", wrong: "Ada masalah? Beritahu pengurus tapak", takePhoto: "Ambil swafoto", confirm: "Sahkan", retake: "Ambil semula", onSite: "Anda berada di tapak", notOnSite: "Anda tiada di tapak. Pergi ke tapak untuk masuk kerja.", send: "Hantar", whichDay: "Hari apa?", whatsWrong: "Apa masalahnya?", wrongTime: "Masa salah", missingDay: "Hari tiada", wrongOT: "OT salah", other: "Lain-lain", sent: "Dihantar kepada pengurus tapak", language: "Bahasa", scanQR: "Imbas kod QR di pintu masuk tapak", scan: "Imbas kod QR", whoAreYou: "Siapa anda?", notYou: "Bukan anda?", approved: "Disahkan", rejected: "Tidak dibayar", hours: "jam", note: "Ceritakan lagi (pilihan)", noDays: "Belum ada hari kerja bulan ini." },
+    id: { today: "Hari ini", notYet: "Belum", hi: "Halo", clockIn: "Absen masuk", clockOut: "Absen pulang", inSince: "Masuk sejak", doneToday: "Selesai hari ini", confirmed: "Dikonfirmasi manajer lapangan", waitingConfirm: "Menunggu konfirmasi manajer lapangan", tomorrow: "Besok", restDay: "Hari libur", noJob: "Belum dijadwalkan", myPay: "Gaji saya bulan ini", days: "hari", ot: "lembur", checked: "dikonfirmasi", waiting: "menunggu", dayRate: "Upah harian", otRate: "Lembur per jam", payDay: "Hari gajian", myDays: "Hari kerja saya", wrong: "Ada yang salah? Beri tahu manajer lapangan", takePhoto: "Ambil swafoto", confirm: "Konfirmasi", retake: "Ulangi", onSite: "Anda berada di lokasi", notOnSite: "Anda tidak di lokasi. Pergi ke lokasi untuk absen.", send: "Kirim", whichDay: "Hari apa?", whatsWrong: "Apa yang salah?", wrongTime: "Jam salah", missingDay: "Hari hilang", wrongOT: "Lembur salah", other: "Lainnya", sent: "Terkirim ke manajer lapangan", language: "Bahasa", scanQR: "Pindai kode QR di gerbang lokasi", scan: "Pindai kode QR", whoAreYou: "Siapa Anda?", notYou: "Bukan Anda?", approved: "Dikonfirmasi", rejected: "Tidak dibayar", hours: "jam", note: "Ceritakan lebih lanjut (opsional)", noDays: "Belum ada hari kerja bulan ini." },
+    bn: { today: "আজ", notYet: "এখনও না", hi: "হ্যালো", clockIn: "কাজ শুরু", clockOut: "কাজ শেষ", inSince: "শুরু হয়েছে", doneToday: "আজকের কাজ শেষ", confirmed: "সাইট ম্যানেজার নিশ্চিত করেছেন", waitingConfirm: "সাইট ম্যানেজারের নিশ্চিতকরণের অপেক্ষায়", tomorrow: "আগামীকাল", restDay: "ছুটির দিন", noJob: "এখনও ঠিক হয়নি", myPay: "এই মাসে আমার বেতন", days: "দিন", ot: "ওভারটাইম", checked: "নিশ্চিত", waiting: "অপেক্ষায়", dayRate: "দৈনিক মজুরি", otRate: "প্রতি ঘণ্টা ওভারটাইম", payDay: "বেতনের দিন", myDays: "আমার কাজের দিন", wrong: "কিছু ভুল? সাইট ম্যানেজারকে জানান", takePhoto: "সেলফি তুলুন", confirm: "নিশ্চিত করুন", retake: "আবার তুলুন", onSite: "আপনি সাইটে আছেন", notOnSite: "আপনি সাইটে নেই। কাজ শুরু করতে সাইটে যান।", send: "পাঠান", whichDay: "কোন দিন?", whatsWrong: "কী ভুল?", wrongTime: "সময় ভুল", missingDay: "দিন বাদ পড়েছে", wrongOT: "ওভারটাইম ভুল", other: "অন্যান্য", sent: "সাইট ম্যানেজারকে পাঠানো হয়েছে", language: "ভাষা", scanQR: "সাইটের গেটে QR কোড স্ক্যান করুন", scan: "QR কোড স্ক্যান করুন", whoAreYou: "আপনি কে?", notYou: "আপনি নন?", approved: "নিশ্চিত", rejected: "বেতন হবে না", hours: "ঘণ্টা", note: "আরও বলুন (ঐচ্ছিক)", noDays: "এই মাসে এখনও কোনো দিন নেই।" },
+    ne: { today: "आज", notYet: "अझै छैन", hi: "नमस्ते", clockIn: "काम सुरु", clockOut: "काम सकियो", inSince: "सुरु भएको", doneToday: "आजको काम सकियो", confirmed: "साइट म्यानेजरले पुष्टि गर्नुभयो", waitingConfirm: "साइट म्यानेजरको पुष्टिको पर्खाइमा", tomorrow: "भोलि", restDay: "बिदाको दिन", noJob: "अझै तय भएको छैन", myPay: "यो महिनाको मेरो तलब", days: "दिन", ot: "ओभरटाइम", checked: "पुष्टि भयो", waiting: "पर्खाइमा", dayRate: "दैनिक ज्याला", otRate: "प्रति घण्टा ओभरटाइम", payDay: "तलब आउने दिन", myDays: "मेरा कामका दिन", wrong: "केही गलत छ? साइट म्यानेजरलाई भन्नुहोस्", takePhoto: "सेल्फी खिच्नुहोस्", confirm: "पुष्टि गर्नुहोस्", retake: "फेरि खिच्नुहोस्", onSite: "तपाईं साइटमा हुनुहुन्छ", notOnSite: "तपाईं साइटमा हुनुहुन्न। काम सुरु गर्न साइटमा जानुहोस्।", send: "पठाउनुहोस्", whichDay: "कुन दिन?", whatsWrong: "के गलत छ?", wrongTime: "समय गलत", missingDay: "दिन छुट्यो", wrongOT: "ओभरटाइम गलत", other: "अन्य", sent: "साइट म्यानेजरलाई पठाइयो", language: "भाषा", scanQR: "साइटको गेटमा QR कोड स्क्यान गर्नुहोस्", scan: "QR कोड स्क्यान गर्नुहोस्", whoAreYou: "तपाईं को हो?", notYou: "तपाईं होइन?", approved: "पुष्टि भयो", rejected: "तलब हुँदैन", hours: "घण्टा", note: "थप भन्नुहोस् (ऐच्छिक)", noDays: "यो महिना अझै कुनै दिन छैन।" },
+    my: { today: "ဒီနေ့", notYet: "မရှိသေး", hi: "မင်္ဂလာပါ", clockIn: "အလုပ်ဝင်", clockOut: "အလုပ်ဆင်း", inSince: "ဝင်ချိန်", doneToday: "ဒီနေ့ အလုပ်ပြီးပါပြီ", confirmed: "ဆိုက်မန်နေဂျာ အတည်ပြုပြီး", waitingConfirm: "ဆိုက်မန်နေဂျာ အတည်ပြုရန် စောင့်နေသည်", tomorrow: "မနက်ဖြန်", restDay: "အနားယူရက်", noJob: "မသတ်မှတ်ရသေး", myPay: "ဒီလ ကျွန်ုပ်၏ လစာ", days: "ရက်", ot: "အချိန်ပို", checked: "အတည်ပြုပြီး", waiting: "စောင့်ဆိုင်းဆဲ", dayRate: "နေ့စား လုပ်ခ", otRate: "တစ်နာရီ အချိန်ပိုခ", payDay: "လစာထုတ်ရက်", myDays: "ကျွန်ုပ်၏ အလုပ်ရက်များ", wrong: "မှားနေလား? ဆိုက်မန်နေဂျာကို ပြောပါ", takePhoto: "ဆယ်လ်ဖီ ရိုက်ပါ", confirm: "အတည်ပြုပါ", retake: "ပြန်ရိုက်ပါ", onSite: "သင် ဆိုက်တွင် ရှိနေသည်", notOnSite: "သင် ဆိုက်တွင် မရှိပါ။ အလုပ်ဝင်ရန် ဆိုက်သို့ သွားပါ။", send: "ပို့ပါ", whichDay: "ဘယ်နေ့လဲ?", whatsWrong: "ဘာမှားနေလဲ?", wrongTime: "အချိန် မှားသည်", missingDay: "ရက် ကျန်နေသည်", wrongOT: "အချိန်ပို မှားသည်", other: "အခြား", sent: "ဆိုက်မန်နေဂျာထံ ပို့ပြီးပါပြီ", language: "ဘာသာစကား", scanQR: "ဆိုက်ဂိတ်ရှိ QR ကုဒ်ကို စကင်ဖတ်ပါ", scan: "QR ကုဒ် စကင်ဖတ်ပါ", whoAreYou: "သင် ဘယ်သူလဲ?", notYou: "သင် မဟုတ်ဘူးလား?", approved: "အတည်ပြုပြီး", rejected: "လစာ မရ", hours: "နာရီ", note: "ထပ်ပြောပါ (မဖြစ်မနေမဟုတ်)", noDays: "ဒီလ အလုပ်ရက် မရှိသေးပါ။" }
   };
   const W = () => S.people.worker;
   const me = () => worker(W().workerId);
@@ -1220,7 +1254,10 @@
     if (!s.in) big = '<button class="w-big" data-action="w-clock" data-act="in">' + icon("camera") + "<span>" + tr("clockIn") + "</span></button>";
     else if (!s.out) big = '<button class="w-big out" data-action="w-clock" data-act="out">' + icon("camera") + "<span>" + tr("clockOut") + "</span><small>" + tr("inSince") + " " + esc(s.in) + "</small></button>";
     else big = '<div class="w-big done">' + icon("check") + "<span>" + tr("doneToday") + "</span><small>" + esc(s.in) + " – " + esc(s.out) + "</small></div>";
-    const confirmLine = s.in ? (r.in ? '<div class="w-status">' + icon("check") + tr("confirmed") + "</div>" : '<div class="w-status wait">' + icon("clock") + tr("waitingConfirm") + "</div>") : "";
+    const confirmLine = s.in ? '<div class="card w-today"><div class="w-today-head">' + tr("today") + '</div><div class="att-photos">' +
+      "<figure>" + img(s.inPhoto, "", tr("clockIn")) + "<figcaption>" + tr("clockIn") + " " + esc(s.in) + "</figcaption></figure>" +
+      "<figure>" + (s.out ? img(s.outPhoto, "", tr("clockOut")) : '<div class="photo-missing">' + tr("notYet") + "</div>") + "<figcaption>" + tr("clockOut") + " " + (s.out ? esc(s.out) : "–") + "</figcaption></figure></div>" +
+      (needsConfirm(r) ? '<div class="w-status wait">' + icon("clock") + tr("waitingConfirm") + "</div>" : '<div class="w-status">' + icon("check") + tr("confirmed") + (r.in ? " " + esc(s.out && r.out ? r.out : r.in) : "") + "</div>") + "</div>" : "";
     const mk = monthKey(t), m = workerMonth(w, mk);
     const hourly = w.dayRate / S.settings.normalHours * S.settings.otRate;
     const dayRows = m.recs.length ? '<div class="list">' + m.recs.map((x) => { const h = calcHours(x); const f = h.final; return '<div class="li"><div class="li-main"><div class="li-title">' + fmtDay(x.date) + '</div><div class="li-sub">' + (f.half ? "½ " : "") + hrs(f.normal) + (f.ot ? " + " + hrs(f.ot) + " " + tr("ot") : "") + "</div></div>" +
@@ -1297,6 +1334,22 @@
   const errBox = () => (ui.sheet.err ? '<div class="form-error">' + ui.sheet.err + "</div>" : "");
 
   const SHEETS = {
+    notes() {
+      const list = myNotes().slice(0, 40);
+      const W_ = role() === "worker";
+      const text = (n) => {
+        const w = worker(n.workerId), name = w ? esc(w.name) : "A worker", site = project(n.projectId) ? esc(project(n.projectId).name) : "";
+        if (n.type === "selfie-in") return "<b>" + name + "</b> clocked in with a selfie at " + n.time + (site ? ", " + site : "");
+        if (n.type === "selfie-out") return "<b>" + name + "</b> clocked out with a selfie at " + n.time + (site ? ", " + site : "");
+        if (n.type === "report") return "<b>" + name + "</b> reported: " + esc(n.text || "") + (n.forDate ? " (" + fmtDay(n.forDate) + ")" : "");
+        if (n.type === "confirmed") return W_ ? "<b>" + tr("confirmed") + "</b> " + n.time : "<b>" + name + "</b> confirmed at " + n.time;
+        return esc(n.text || "");
+      };
+      return sheetHead(W_ ? '<span style="display:inline-flex;gap:8px;align-items:center">' + icon("bell", ' style="width:22px;height:22px"') + "</span>" : "Notifications") +
+        (list.length ? '<div class="list">' + list.map((n) => '<button class="note' + (n.read ? "" : " unread") + '" data-action="note-open" data-id="' + n.id + '">' +
+          (n.photo ? img(n.photo, "thumb-sm", "") : '<span class="thumb-sm photo-missing">' + icon(n.type === "report" ? "flag" : "check", ' style="width:18px;height:18px"') + "</span>") +
+          '<span class="li-main"><span class="note-t">' + text(n) + '</span><span class="li-sub">' + (n.date === today() ? "Today" : fmtDay(n.date)) + "</span></span>" + (n.read ? "" : '<span class="dot" style="background:var(--blue)"></span>') + "</button>").join("") + "</div>" : empty(W_ ? "–" : "No notifications yet. You will see one here when a worker clocks in with a selfie."));
+    },
     panel(s) {
       const it = (TILE_REG[s.g] || []).find((x) => x.id === s.t);
       return it ? sheetHead(it.title || it.label) + it.body() : sheetHead("");
@@ -1605,10 +1658,24 @@
       renderSheet(); render();
     },
 
+    "open-notes"() { ui.menu = false; openSheet({ type: "notes" }); setTimeout(() => { myNotes().forEach((n) => { n.read = true; }); save(); renderTop(); }, 400); },
+    "note-open"(el) {
+      const n = S.notifications.find((x) => x.id === el.dataset.id); if (!n) return;
+      n.read = true; save(); closeSheet();
+      if (role() === "worker") { render(); return; }
+      ui.attSite = n.projectId; ui.attDate = n.forDate || n.date; ui.attPicked = true;
+      const r = S.attendance.find((a) => a.workerId === n.workerId && a.date === ui.attDate);
+      ui.attFilter = n.type === "report" ? "all" : r && needsConfirm(r) ? "confirm" : "selfie";
+      ui.attFocus = n.workerId;
+      if (location.hash === "#/attendance") render(); else location.hash = "#/attendance";
+    },
+    "att-filter"(el) { ui.attFilter = el.dataset.f; ui.attFocus = null; render(); },
+    "att-review"(el) { ui.attSite = el.dataset.site; ui.attDate = today(); ui.attFilter = "confirm"; ui.attPicked = true; location.hash = "#/attendance"; },
     "clock-confirm"(el) {
       const r = S.attendance.find((a) => a.id === el.dataset.id); if (!r) return;
       const w = worker(r.workerId), tm = nowHM();
       if (el.dataset.act === "in") r.in = tm; else r.out = tm;
+      notify({ type: "confirmed", to: "worker", workerId: r.workerId, projectId: r.projectId });
       save(); toast(esc(w.name) + (el.dataset.act === "in" ? " confirmed in at " : " confirmed out at ") + tm);
       if (ui.sheet && ui.sheet.type === "clock") renderSheet();
       render();
@@ -1616,7 +1683,7 @@
     "confirm-all"(el) {
       const tm = nowHM();
       const list = S.attendance.filter((a) => a.projectId === el.dataset.site && a.date === today() && a.self && ((a.self.in && !a.in) || (a.self.out && a.in && !a.out)));
-      list.forEach((a) => { if (!a.in) a.in = tm; else a.out = tm; });
+      list.forEach((a) => { if (!a.in) a.in = tm; else a.out = tm; notify({ type: "confirmed", to: "worker", workerId: a.workerId, projectId: a.projectId }); });
       save(); toast("Confirmed " + plural(list.length, "worker") + ".");
       if (ui.sheet && ui.sheet.type === "clock") renderSheet();
       render();
@@ -1642,9 +1709,12 @@
       let r = S.attendance.find((a) => a.workerId === w.id && a.date === t);
       if (!r) { r = { id: uid("at"), workerId: w.id, projectId: sid, date: t, in: null, out: null, inPhoto: null, outPhoto: null, self: null, status: "waiting", adjust: null, note: "" }; S.attendance.push(r); }
       r.self = r.self || {};
+      w.hasPhone = true; // they just used their own phone
       if (s.act === "in") { r.self.in = s.time; r.self.inPhoto = ref; r.self.inLoc = "on site"; }
       else { r.self.out = s.time; r.self.outPhoto = ref; r.self.outLoc = "on site"; }
-      save(); closeSheet(); render(); toast((s.act === "in" ? tr("clockIn") : tr("clockOut")) + " " + s.time);
+      notify({ type: s.act === "in" ? "selfie-in" : "selfie-out", to: "site", workerId: w.id, projectId: r.projectId, photo: ref, time: s.time });
+      save(); closeSheet(); render(); toast((s.act === "in" ? tr("clockIn") : tr("clockOut")) + " " + s.time + ". " + tr("waitingConfirm") + ".");
+      window.scrollTo(0, 0);
     },
     "w-report"() { openSheet({ type: "wreport" }); },
     "w-report-save"() {
@@ -1653,6 +1723,7 @@
       const date = f.date || today();
       const rec = S.attendance.find((a) => a.workerId === w.id && a.date === date);
       S.disputes.push({ id: uid("ds"), workerId: w.id, date, projectId: rec ? rec.projectId : W().siteId, reason: T.en[f.reason], note: (f.note || "").trim(), status: "open", at: new Date().toISOString() });
+      notify({ type: "report", to: "site", workerId: w.id, projectId: rec ? rec.projectId : W().siteId, text: T.en[f.reason] + ((f.note || "").trim() ? ", “" + f.note.trim() + "”" : ""), forDate: date });
       commit(tr("sent"));
     },
 
@@ -1920,7 +1991,7 @@
       if (el.dataset.rerender) renderSheet();
     }
     const c = el.dataset.change;
-    if (c === "role") { S.role = el.value; save(); ui.attSite = null; enterRoute(); render(); toast("Now viewing as " + ROLE_LABEL[S.role].toLowerCase() + "."); }
+    if (c === "role") { S.role = el.value; save(); ui.attSite = null; ui.attFilter = "all"; ui.attFocus = null; enterRoute(); render(); toast("Now viewing as " + ROLE_LABEL[S.role].toLowerCase() + "." + (unreadCount() ? " You have " + plural(unreadCount(), "new notification") + "." : "")); }
     if (c === "site") { S.people.site.siteId = el.value; save(); render(); }
     if (c === "wlang") { if (me()) me().lang = el.value; W().lang = el.value; save(); render(); }
     if (c === "moneyProject") { ui.moneyProject = el.value; render(); }
