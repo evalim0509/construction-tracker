@@ -182,17 +182,9 @@
 
   /* demo photos are drawn, never stored */
   function hashStr(s) { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0; return Math.abs(h); }
-  function demoFace(key) {
-    const h = hashStr(key);
-    const bgs = ["#CFE3E2", "#D9E2F2", "#E4DDF0", "#DCE8D9", "#EFE3CF", "#E2E6EA"];
-    const skins = ["#8D5A3B", "#B07A55", "#C9946B", "#6E4630", "#D8A47F", "#A0694A"];
-    const hats = ["#F2C230", "#F5F5F2", "#3563C4", "#F2C230", "#E8E8E3"];
-    const bg = bgs[h % bgs.length], skin = skins[(h >> 3) % skins.length], hat = hats[(h >> 5) % hats.length];
-    const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120"><rect width="120" height="120" fill="' + bg + '"/>' +
-      '<rect x="0" y="86" width="120" height="40" fill="#9BB0BF"/><path d="M14 120c4-22 22-32 46-32s42 10 46 32z" fill="#C8F04A"/><path d="M52 90h16v30H52z" fill="#7F93A3"/>' +
-      '<circle cx="60" cy="60" r="22" fill="' + skin + '"/><path d="M34 52c0-16 12-26 26-26s26 10 26 26z" fill="' + hat + '"/><rect x="30" y="50" width="60" height="6" rx="3" fill="' + hat + '"/>' +
-      '<circle cx="52" cy="62" r="2.2" fill="#222"/><circle cx="68" cy="62" r="2.2" fill="#222"/><path d="M53 71q7 5 14 0" stroke="#222" stroke-width="2" fill="none" stroke-linecap="round"/>' +
-      '<text x="114" y="114" font-family="sans-serif" font-size="8" text-anchor="end" fill="#55636F">DEMO</text></svg>';
+  function demoFace() {
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120"><rect width="120" height="120" fill="#E3E7EA"/>' +
+      '<circle cx="60" cy="47" r="21" fill="#C3CBD1"/><path d="M20 120c4-27 21-40 40-40s36 13 40 40z" fill="#C3CBD1"/></svg>';
     return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
   }
   function demoReceipt(key) {
@@ -593,7 +585,7 @@
     const inSum = sum(expIn, (m) => m.amount), outList = billsDue(30), outSum = sum(outList, (m) => m.amount);
     const maxV = Math.max(inSum, outSum, 1);
 
-    return '<div class="page-head"><div><h1 class="greet">' + greeting() + ", " + esc(S.people.boss.name) + '</h1><p class="page-sub">' + fmtDayLong(t) + ". Here is every site at a glance.</p></div></div>" +
+    return '<div class="page-head"><div><p class="greet-small">' + greeting() + ", " + esc(S.people.boss.name) + '</p><h1 class="page-title">Today, ' + fmtDayLong(t).replace(",", "") + '</h1><p class="page-sub">Every site at a glance.</p></div></div>' +
       '<div class="stats">' +
       '<a class="stat" href="#/money"><div class="stat-label">Spent this month' + icon("arrow") + '</div><div class="stat-value num"><span class="unit">RM</span>' + Math.round(spent).toLocaleString("en-MY") + '</div><div class="stat-foot">' + plural(receiptsCount, "receipt") + " in " + MON_LONG[+mk.slice(5) - 1] + "</div></a>" +
       '<a class="stat" href="#/money"><div class="stat-label">Money expected in' + icon("arrow") + '</div><div class="stat-value num"><span class="unit">RM</span>' + Math.round(inSum).toLocaleString("en-MY") + '</div><div class="stat-foot">' + plural(expIn.length, "client payment") + " in the next 30 days</div></a>" +
@@ -604,9 +596,9 @@
       '<div class="stack">' +
       '<div class="card"><div class="card-head"><h2 class="card-title">Needs your attention</h2>' + chip(String(attn.length), attn.length ? "warn" : "good") + "</div>" +
       (attn.length ? attn.slice(0, 5).map((a) => '<a class="attn" href="' + a.href + '"><span class="attn-tag ' + a.cls + '">' + a.tag + '</span><span class="grow small">' + a.text + "</span></a>").join("") : empty("Nothing needs you right now.")) + "</div>" +
-      '<div class="dark-card"><div class="row-between"><div><div class="muted small">Next 30 days</div><div style="font-size:30px;font-weight:300;letter-spacing:-.02em" class="num">' + (inSum - outSum >= 0 ? "+" : "−") + RMshort(inSum - outSum).replace("RM ", "RM ") + '</div></div><div class="muted tiny" style="text-align:right">money in<br>minus bills</div></div>' +
-      '<div class="flow-row"><span class="muted">Coming in</span><div class="flow-bars"><span style="width:' + (inSum / maxV) * 100 + '%;background:#5FC2B4"></span></div><span class="num">' + RMshort(inSum) + "</span></div>" +
-      '<div class="flow-row"><span class="muted">Bills to pay</span><div class="flow-bars"><span style="width:' + (outSum / maxV) * 100 + '%;background:#8FA8E8"></span></div><span class="num">' + RMshort(outSum) + "</span></div>" +
+      '<div class="dark-card"><div class="row-between"><div><div class="muted small">Next 30 days</div><div style="font-size:30px;font-weight:500;letter-spacing:-.02em" class="num">' + (inSum - outSum >= 0 ? "+" : "−") + RMshort(inSum - outSum).replace("RM ", "RM ") + '</div></div><div class="muted tiny" style="text-align:right">money in<br>minus bills</div></div>' +
+      '<div class="flow-row"><span class="muted">Coming in</span><div class="flow-bars"><span style="width:' + (inSum / maxV) * 100 + '%;background:#8DB8B3"></span></div><span class="num">' + RMshort(inSum) + "</span></div>" +
+      '<div class="flow-row"><span class="muted">Bills to pay</span><div class="flow-bars"><span style="width:' + (outSum / maxV) * 100 + '%;background:#A3B4CF"></span></div><span class="num">' + RMshort(outSum) + "</span></div>" +
       '<div class="muted tiny mt-8">Wages are not included yet.</div></div>' +
       "</div></div>" +
       (!S.projects.length ? "" : '<div class="section"><h2 class="section-title">Projects <a class="link-btn small" href="#/projects">See all</a></h2><div class="card"><div class="list">' +
@@ -628,7 +620,7 @@
     const t = today();
     const sid = siteId();
     const p = project(sid);
-    const head = '<div class="page-head"><div><h1 class="greet">' + greeting() + ", " + esc(S.people.site.name) + '</h1><p class="page-sub">' + fmtDayLong(t) + "</p></div>" +
+    const head = '<div class="page-head"><div><p class="greet-small">' + greeting() + ", " + esc(S.people.site.name) + '</p><h1 class="page-title">Today, ' + fmtDayLong(t).replace(",", "") + "</h1></div>" +
       (S.projects.length ? '<div class="role-pick"><label for="sitePick">Your site</label><select id="sitePick" data-change="site">' + S.projects.map((x) => '<option value="' + x.id + '"' + (x.id === sid ? " selected" : "") + ">" + esc(x.name) + "</option>").join("") + "</select></div>" : "") + "</div>";
     if (!p) return head + '<div class="card">' + empty("No projects yet. Ask management to add one.") + "</div>";
 
@@ -654,7 +646,7 @@
     return head +
       '<div class="grid-hero">' +
       '<div class="card" style="padding:28px"><div class="muted">Today at ' + esc(p.name) + "</div>" +
-      '<div class="row" style="align-items:baseline;gap:10px;margin-top:6px"><span class="num" style="font-size:64px;font-weight:300;letter-spacing:-.04em;line-height:1">' + recs.length + '</span><span class="muted" style="font-size:22px">of ' + expected.length + "</span></div>" +
+      '<div class="row" style="align-items:baseline;gap:10px;margin-top:6px"><span class="num" style="font-size:48px;font-weight:500;letter-spacing:-.02em;line-height:1">' + recs.length + '</span><span class="muted" style="font-size:22px">of ' + expected.length + "</span></div>" +
       '<div class="muted">workers clocked in' + (inNow ? ", " + inNow + " on site now" : "") + "</div>" +
       '<div class="mt-16">' + pbar(expected.length ? recs.length / expected.length : 0) + "</div>" +
       '<div class="stack mt-24"><button class="btn btn-primary btn-big btn-block" data-action="open-clock">' + icon("camera") + "Clock in / out</button>" +
@@ -688,9 +680,9 @@
     const toBuy = week.filter((n) => n.status === "to buy");
     const low = lowStock();
     const later = openNeeds().filter((n) => n.by > addDays(t, 7));
-    return '<div class="page-head"><div><h1 class="greet">' + greeting() + ", " + esc(S.people.buyer.name) + '</h1><p class="page-sub">' + fmtDayLong(t) + "</p></div></div>" +
+    return '<div class="page-head"><div><p class="greet-small">' + greeting() + ", " + esc(S.people.buyer.name) + '</p><h1 class="page-title">Today, ' + fmtDayLong(t).replace(",", "") + "</h1></div></div>" +
       '<div class="grid-hero">' +
-      '<div class="card" style="padding:26px"><div class="row-between"><div><div class="muted">To buy this week</div><div class="row" style="align-items:baseline;gap:10px;margin-top:4px"><span class="num" style="font-size:60px;font-weight:300;letter-spacing:-.04em;line-height:1">' + toBuy.length + '</span><span class="muted" style="font-size:20px">' + (toBuy.length === 1 ? "item" : "items") + " not ordered</span></div></div></div>" +
+      '<div class="card" style="padding:26px"><div class="row-between"><div><div class="muted">To buy this week</div><div class="row" style="align-items:baseline;gap:10px;margin-top:4px"><span class="num" style="font-size:48px;font-weight:500;letter-spacing:-.02em;line-height:1">' + toBuy.length + '</span><span class="muted" style="font-size:20px">' + (toBuy.length === 1 ? "item" : "items") + " not ordered</span></div></div></div>" +
       '<div class="list mt-16">' + (week.length ? week.map(needRow).join("") : empty("Nothing needed this week.")) + "</div>" +
       '<button class="btn btn-soft btn-block mt-16" data-action="new-need">' + icon("plus") + "Add something to buy</button></div>" +
       '<div class="stack">' +
@@ -1071,8 +1063,8 @@
       maxW = Math.max(maxW, inn, out); weeks.push({ a, inn, out });
     }
     const net6 = sum(weeks, (w) => w.inn - w.out);
-    const flow = () => '<div class="dark-card"><div class="row small muted" style="gap:14px;margin-bottom:6px"><span class="row" style="gap:6px"><span class="dot" style="background:#5FC2B4"></span>Coming in</span><span class="row" style="gap:6px"><span class="dot" style="background:#8FA8E8"></span>Bills</span></div>' +
-      weeks.map((w, i) => '<div class="flow-row"><span class="muted">' + (i === 0 ? "This week" : "From " + fmtDay(w.a).slice(4)) + '</span><div class="flow-bars"><span style="width:' + (w.inn / maxW) * 100 + '%;background:#5FC2B4"></span><span style="width:' + (w.out / maxW) * 100 + '%;background:#8FA8E8"></span></div><span class="num small" style="text-align:right">' + (w.inn - w.out >= 0 ? "+" : "−") + RMshort(Math.abs(w.inn - w.out)) + "</span></div>").join("") +
+    const flow = () => '<div class="dark-card"><div class="row small muted" style="gap:14px;margin-bottom:6px"><span class="row" style="gap:6px"><span class="dot" style="background:#8DB8B3"></span>Coming in</span><span class="row" style="gap:6px"><span class="dot" style="background:#A3B4CF"></span>Bills</span></div>' +
+      weeks.map((w, i) => '<div class="flow-row"><span class="muted">' + (i === 0 ? "This week" : "From " + fmtDay(w.a).slice(4)) + '</span><div class="flow-bars"><span style="width:' + (w.inn / maxW) * 100 + '%;background:#8DB8B3"></span><span style="width:' + (w.out / maxW) * 100 + '%;background:#A3B4CF"></span></div><span class="num small" style="text-align:right">' + (w.inn - w.out >= 0 ? "+" : "−") + RMshort(Math.abs(w.inn - w.out)) + "</span></div>").join("") +
       '<div class="muted tiny mt-8">Wages are not included yet.</div></div>';
 
     // where the money went
@@ -1203,7 +1195,7 @@
 
   function viewWorker() {
     const st = W();
-    const head = (title, sub) => '<div class="w-head"><div><h1 class="greet" style="font-size:clamp(28px,6vw,40px)">' + title + "</h1>" + (sub ? '<p class="page-sub">' + sub + "</p>" : "") + "</div>" + langPick() + "</div>";
+    const head = (title, sub) => '<div class="w-head"><div><h1 class="greet">' + title + "</h1>" + (sub ? '<p class="page-sub">' + sub + "</p>" : "") + "</div>" + langPick() + "</div>";
     if (!st.siteId || !project(st.siteId)) {
       return '<div class="w-wrap">' + head(tr("scanQR")) +
         '<div class="card w-scan"><div class="w-qr">' + icon("qr") + "</div>" +
@@ -1234,7 +1226,7 @@
     const dayRows = m.recs.length ? '<div class="list">' + m.recs.map((x) => { const h = calcHours(x); const f = h.final; return '<div class="li"><div class="li-main"><div class="li-title">' + fmtDay(x.date) + '</div><div class="li-sub">' + (f.half ? "½ " : "") + hrs(f.normal) + (f.ot ? " + " + hrs(f.ot) + " " + tr("ot") : "") + "</div></div>" +
       (x.status === "approved" ? chip(tr("approved"), "good") : x.status === "rejected" ? chip(tr("rejected"), "bad") : chip(tr("waiting"), "warn")) + '<span class="li-amt num">' + (x.status === "rejected" ? "–" : RM(Math.round(payFor(x)))) + "</span></div>"; }).join("") + "</div>" : empty(tr("noDays"));
     return '<div class="w-wrap">' +
-      '<div class="w-head"><div><h1 class="greet" style="font-size:clamp(28px,6vw,40px)">' + tr("hi") + " " + esc(w.name.replace(/^(Md\.|Mohd)\s+/, "").split(" ")[0]) + '</h1><p class="page-sub">' + esc(site.name) + ", " + fmtDay(t) + ' <button class="link-btn small" data-action="w-notme">' + tr("notYou") + "</button></p></div>" + langPick() + "</div>" +
+      '<div class="w-head"><div><h1 class="greet">' + tr("hi") + " " + esc(w.name.replace(/^(Md\.|Mohd)\s+/, "").split(" ")[0]) + '</h1><p class="page-sub">' + esc(site.name) + ", " + fmtDay(t) + ' <button class="link-btn small" data-action="w-notme">' + tr("notYou") + "</button></p></div>" + langPick() + "</div>" +
       big + confirmLine +
       '<div class="card w-tomorrow">' + icon("calendar") + "<span><span class=\"muted\">" + tr("tomorrow") + "</span><b>" + tomorrowTxt + "</b></span></div>" +
       '<div class="card w-pay"><div class="muted">' + tr("myPay") + '</div><div class="w-pay-num num">' + RM(Math.round(m.checked + m.waiting)) + "</div>" +

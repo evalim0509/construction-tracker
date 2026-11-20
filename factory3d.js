@@ -9,9 +9,10 @@
   "use strict";
 
   const COLORS = {
-    ground: 0xE9EDF0, slab: 0xD3DAE0, steel: 0x4E5B66, wall: 0xEEF1F3, roof: 0xB8C2CA,
-    current: 0x1E9A97, glass: 0x2C3E50, office: 0xE6EBEE, crane: 0xE0B341, blue: 0x3563C4,
-    teal: 0x0F7F82, pallet: 0xC7B49A, rebar: 0x6E5B4E, edge: 0x2B3944, truck: 0xF2F4F5
+    // greys only (v0.4): reads like an architect's model, not a toy
+    ground: 0xE9EDF0, slab: 0xD6DBDF, steel: 0x535E67, wall: 0xEEF0F2, roof: 0xB9C0C6,
+    current: 0x8A959E, glass: 0x3A444C, office: 0xE4E7EA, crane: 0xA9B1B7, blue: 0x8C979F,
+    teal: 0x9FA9B1, pallet: 0xC9CDD0, rebar: 0x6B737A, edge: 0x2B3944, truck: 0xF2F4F5
   };
 
   function hash(str) {

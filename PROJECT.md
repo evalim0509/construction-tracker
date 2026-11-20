@@ -148,20 +148,37 @@ one are clocked in by the site manager with a photo, as before.
 | W8 | Language | Worker picks: English, Bahasa Malaysia, Bengali, Nepali, Indonesian, Burmese (all but English are **drafts**) |
 | W9 | Worker sign-in | **QR code poster at the site gate**, then pick your name once |
 | W10 | Match status | Yes: green "Matched", amber "Times differ" / "Only worker clocked in" / "Worker did not clock in" |
+| V1 | Corners (v0.4) | Tight: 8px cards, 6px buttons |
+| V2 | Colours | Dark ink buttons, muted teal for progress, toned-down status colours |
+| V3 | Surfaces | White page, thin grey borders, no shadows |
+| V4 | Font | IBM Plex Sans |
+| V5 | 3D building | Same model in grey only |
+| V6 | Status labels | Small dot + text |
+| V7 | Navigation | Left sidebar on laptop, docked bar on phone |
+| V8 | Demo worker pictures | Grey photo placeholders |
+| V9 | Headings | Page name first ("Today, Friday 20 November"), small greeting above |
+| V10 | Section tiles | Tabs with icons, counts and an underline |
 | Pay | Pay day | 7th of the next month (Employment Act: within 7 days of the month ending) |
 
-### Design tokens
-| Token | Hex | Use |
+### Design tokens (v0.4 professional theme)
+| Token | Value | Use |
 |---|---|---|
-| Concrete mist | `#ECEFF1` | Page background |
-| Ink | `#16232E` | Text, active tab |
-| Teal | `#0F7F82` | Main actions, progress, done |
-| Steel blue | `#3563C4` | Info, "ordered", clock out |
-| Amber | `#D9822B` | Needs attention only (late, low stock) |
-| Red | `#C9473F` | Problems only (overdue, rejected) |
+| Page | `#FFFFFF` | Page background |
+| Soft fill | `#F3F5F7` | Fills inside cards (inputs, counters, selected menu item) |
+| Line | `#E1E5E9` | 1px borders around cards and rows (no shadows) |
+| Ink | `#16232E` | Text, **main buttons**, active tab underline |
+| Muted teal | `#2F6F73` | Progress bars and small accents only |
+| Muted blue | `#3E5C8A` | Info, "ordered", clock out |
+| Amber | `#B7791F` | Needs attention only (late, low stock) |
+| Red | `#A63D35` | Problems only (overdue, rejected) |
+| Green | `#3B6B55` | Done, matched |
 | Slate | `#1A2733` | The one dark card (cash flow) |
 
-Radius scale: hero 28px, cards 22px, rows/inputs 16px, chips round.
+- **Font:** IBM Plex Sans (Noto Sans for Bengali, Devanagari and Myanmar scripts). Numbers at medium weight with tabular figures.
+- **Corners:** cards 8px, buttons and inputs 6px, small counters 4px. No pill shapes.
+- **Status labels:** small coloured dot + text.
+- **Sections:** tabs with an icon, word and count; the open one is underlined.
+- **Navigation:** left sidebar on laptop and tablet; flat top bar with the Log button and a flat bottom bar docked to the edge on phones.
 
 ## 7. How it works (technical)
 
@@ -223,6 +240,19 @@ Site manager only worker has no phone                             → neutral, n
 10. **e-Invoicing (LHDN MyInvois)** is being phased in. Accountants will ask for supplier TIN and e-invoice numbers. Plan fields for it before production.
 
 ## 9. Change log
+
+### v0.4.0 — 20 Nov 2026 — professional look
+Client feedback: "rounded corners, bright colours and 3D looks make it look like a kids app; I don't feel professionalism and serious business". Each change was shown as a before/after image and approved one by one (V1 to V10 in section 6).
+- **Corners:** cards 8px, buttons 6px. No more pill-shaped buttons, chips or menus.
+- **Colours:** main buttons are dark ink instead of bright teal. Teal is muted and only used for progress. Status colours are toned down.
+- **Surfaces:** white page, thin grey borders around cards, no floating shadows or glow under buttons.
+- **Font:** IBM Plex Sans instead of Outfit. Big numbers at medium weight and a calmer size.
+- **3D building:** same generated model, now in greys only (no yellow crane or blue containers). The flat background replaces the gradient.
+- **Status labels:** small dot + text ("● On time", "● 12 days late") instead of filled coloured pills.
+- **Navigation:** left sidebar on laptop and tablet (menu, "Viewing as", Log button, ☰ menu at the bottom). On phones, a flat top bar holds the Log button and the bottom bar is docked to the edge. The floating round button is gone.
+- **Demo worker pictures:** plain grey photo placeholders instead of cartoon faces.
+- **Headings:** a small "Good afternoon, Mr. Lim" above a bold "Today, Friday 20 November". Other page titles are smaller and semibold.
+- **Section tiles** are now tabs (icon, word, count) with an underline on the open one. On phones a tab still opens as a pop-up.
 
 ### v0.3.1 — 20 Nov 2026 — opens straight on "Good morning"
 Client feedback: "I don't want the first page to be import data, I want it to be like Good morning xxx, here's today".
