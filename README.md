@@ -13,7 +13,8 @@ WhatsApp and Excel**, in plain English.
 **Live:** https://evalim0509.github.io/construction-tracker/
 
 Open the link and press **Try with sample data**. Then use **Viewing as** at
-the top to switch between *Management*, *Site manager* and *Material buyer*.
+the top to switch between *Management*, *Site manager*, *Material buyer* and
+*Construction worker*.
 
 To run it on your own computer, download the repo and open `index.html` in a
 browser. No install needed.
@@ -34,6 +35,7 @@ browser. No install needed.
 | `sample-data.js` | The "Try with sample data" company (GCL Builders) |
 | `factory3d.js` | The generated 3D factory / warehouse |
 | `three.min.js` | 3D library (three.js r128, MIT licence) |
+| `qrcode.js` | QR code maker for the site clock-in poster (qrcode-generator 1.4.4, MIT licence) |
 | `PROJECT.md` | **Requirements, decisions, methodology and change log** |
 
 ## Things to try
@@ -41,4 +43,6 @@ browser. No install needed.
 - **+ Log → Receipt or cash:** type an amount and what it was for, then save.
 - **Calendar:** tap a day to see which crews are where. Try booking Crew A on today's date: it's blocked because Crew A is already booked.
 - **Projects:** open one, drag the 3D building, tick a phase, or press **Delay this job**.
-- **Money** (as Management): **Download for accountant** gives a CSV for Excel.
+- **Money** (as Management): tap **Where it went** to see spending by category; **Download for accountant** gives a CSV for Excel.
+- **Construction worker:** switch "Viewing as" to Construction worker, tap **Scan QR code**, pick a site and a name, then **Clock in**. Switch back to Site manager and confirm them under the **To confirm** tile.
+- **Project page → Site QR:** the poster workers scan at the gate.

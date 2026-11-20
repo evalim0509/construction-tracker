@@ -26,12 +26,13 @@ licence. Transparent, reliable, trustworthy and cheap. It has to feel
 
 | Role | Device | What they do every day |
 |---|---|---|
+| **Construction worker** (v0.3) | Own phone, if they have one | Scans the site QR code, clocks in and out with a selfie, sees their days, hours and pay, reports a wrong day |
 | **Site manager** | Phone on site | Clocks workers in/out with a photo, checks and approves hours, logs receipts and material use, ticks off work phases, logs delays |
 | **Material buyer** | Phone or laptop | Sees what to buy this week, marks orders and deliveries, watches low stock |
 | **Senior management** | Laptop | Watches cash flow, spending, projects running late, bills due |
 
-Workers do **not** need accounts or smartphones. They tap their name on the
-site manager's phone and a selfie is taken.
+Workers **with** a smartphone clock themselves in (v0.3). Workers **without**
+one are clocked in by the site manager with a photo, as before.
 
 ## 3. Requirements (from the Q&A with the client)
 
@@ -81,6 +82,8 @@ site manager's phone and a selfie is taken.
 | Book crews | ✅ | ✅ | ❌ |
 | Add projects, workers, crews; change settings | ✅ | ❌ | ❌ |
 
+**Construction worker (v0.3):** sees only their own screen: clock in/out, their own days, hours, pay, day rate, pay day, and where they work tomorrow. They can send a report about a wrong day. No access to anything else.
+
 ## 5. Methodology
 
 1. **Challenge the brief first.** Before any code, the idea was put through
@@ -127,6 +130,25 @@ site manager's phone and a selfie is taken.
 | T2 | Hosting | GitHub Pages |
 | T3 | Tech | Plain HTML/CSS/JS, data saved in the browser |
 | T4 | Demo company | GCL Builders |
+| C1 | Categories (v0.3) | Receipts and bills by spending category; attendance and clock-in list by crew; projects by Running / Starting soon / Finished |
+| C2 | Receipt categories | Materials, Machine & equipment rental, Transport & fuel, Subcontractors, Site expenses, Tools & safety gear, Utilities & permits, Office & admin |
+| C3 | Picking a category | **Required**, tap one of 8 big buttons |
+| C4 | Spending breakdown | Yes, "Where it went" for management |
+| P1 | Sections | Icon tiles with a word and a number, never icon-only |
+| P2 | Opening a tile | Opens under the row on a laptop, as a pop-up on a phone. All closed at first |
+| P3 | Where | Everywhere (project page, site manager and buyer home, Money) |
+| W0 | Worker phones | Some have smartphones, some don't. Both are supported |
+| W1 | Dual count | Worker clocks in with a selfie; site manager confirms with one tap |
+| W2 | Times differ (> 15 min) | Flagged amber; the **site manager's time is paid** |
+| W3 | Only one side recorded | Flagged for the site manager to decide |
+| W4 | Location | Must be within 200 m of the site (simulated in the prototype) |
+| W5 | Worker sees | Days and hours incl. OT, estimated pay, day rate, pay day |
+| W6 | Report button | Yes, "Something wrong? Tell site manager" |
+| W7 | Tomorrow | Yes, shows tomorrow's site |
+| W8 | Language | Worker picks: English, Bahasa Malaysia, Bengali, Nepali, Indonesian, Burmese (all but English are **drafts**) |
+| W9 | Worker sign-in | **QR code poster at the site gate**, then pick your name once |
+| W10 | Match status | Yes: green "Matched", amber "Times differ" / "Only worker clocked in" / "Worker did not clock in" |
+| Pay | Pay day | 7th of the next month (Employment Act: within 7 days of the month ending) |
 
 ### Design tokens
 | Token | Hex | Use |
@@ -153,14 +175,18 @@ Radius scale: hero 28px, cards 22px, rows/inputs 16px, chips round.
 ```
 projects     id, name, client, location, type, start, end, originalEnd, value, phases[], delays[], photo, color
 crews        id, name, trade, leaderId
-workers      id, name, crewId, dayRate, phone
+workers      id, name, crewId, dayRate, phone, hasPhone, lang
 assignments  id, crewId, projectId, from, to          (crew bookings; overlap is blocked)
-attendance   id, workerId, projectId, date, in, out, inPhoto, outPhoto, status(waiting|approved|rejected), adjust{normal,ot,half,reason}
+attendance   id, workerId, projectId, date,
+             in, out, inPhoto, outPhoto            (site manager's side; wins for pay)
+             self{in, out, inPhoto, outPhoto, inLoc} (worker's own phone; second count)
+             status(waiting|approved|rejected), adjust{normal,ot,half,reason}
+disputes     id, workerId, date, projectId, reason, note, status(open|sorted)
 materials    id, name, unit, qty (in yard), min, cat (category; guessed from the name if missing)
 needs        id, projectId, materialId, qty, by, status(to buy|ordered|arrived)
 moves        id, date, materialId, qty, kind(in|out|direct), projectId
-money        id, dir(in|out), status(paid|expected), date, amount, what, projectId, paidBy, supplier, ref, photo, by
-settings     normalHours, breakHours, breakAfter, halfDayUnder, otRate, photoKeepDays, sundayOff
+money        id, dir(in|out), status(paid|expected), date, amount, what, cat, projectId, paidBy, supplier, ref, photo, by
+settings     normalHours, breakHours, breakAfter, halfDayUnder, otRate, photoKeepDays, sundayOff, matchMinutes, payDay, geofenceM
 ```
 
 ### Hours rule
@@ -173,6 +199,16 @@ pay    = day rate (or half) + OT × (day rate ÷ 8) × 1.5
 ```
 If the site manager changes anything, their numbers replace the automatic ones and a reason is stored.
 
+### Two-sided attendance rule (v0.3)
+```
+times used for pay = site manager's times, else the worker's own
+Matched           both sides within 15 min (in and out)          → green, "Approve all matched" covers it
+Times differ      more than 15 min apart                          → amber, site manager's time paid unless changed
+Only worker       worker clocked in, site manager never confirmed → amber, site manager decides
+Worker didn't     worker has a phone but didn't clock in          → amber, site manager decides
+Site manager only worker has no phone                             → neutral, not flagged
+```
+
 ## 8. Business risks still open (be honest with yourself)
 
 1. **Data on one device.** The prototype can't be shared between the site manager's phone and the boss's laptop. That needs option B (backend), which brings monthly hosting costs and the work of building logins.
@@ -180,10 +216,32 @@ If the site manager changes anything, their numbers replace the automatic ones a
 3. **Stock counts drift.** They only stay right if every delivery and every "material out" is logged. Watch whether the buyer keeps it up for 3 weeks.
 4. **Pricing undecided.** Decide before the second customer, e.g. per company per month, with a free tier for 1 site.
 5. **Competitors** (Buildertrend, Procore, Fieldwire, Jobber, local payroll apps). Our edge is simplicity, Malaysian context and price. Don't add features that erode simplicity.
-6. **PDPA:** worker photos are personal data. The production version needs a written consent notice for workers and a proper retention job on the server.
-7. **e-Invoicing (LHDN MyInvois)** is being phased in. Accountants will ask for supplier TIN and e-invoice numbers. Plan fields for it before production.
+6. **Workers clocking in from home.** The prototype only pretends to check location. The real version must check the phone's GPS against the site and save the distance with each clock-in. GPS can be faked on rooted phones, which is why the site manager's tap still matters.
+7. **Translations are drafts.** Bengali, Nepali, Indonesian, Burmese and Bahasa Malaysia text must be checked by a native speaker before workers use it. Wrong wording about pay causes disputes.
+8. **QR sign-in is weak identity.** Anyone who picks a name on a shared phone can clock in as someone else. The selfie and the site manager's tap are the real proof. The production version should lock a phone to one worker after the first sign-in.
+9. **PDPA:** worker photos are personal data. The production version needs a written consent notice for workers and a proper retention job on the server.
+10. **e-Invoicing (LHDN MyInvois)** is being phased in. Accountants will ask for supplier TIN and e-invoice numbers. Plan fields for it before production.
 
 ## 9. Change log
+
+### v0.3.0 — 20 Nov 2026 — categories everywhere, icon tiles, construction worker role
+Client feedback: "everything should have categories, I don't want long lists", "sections collapsed by default and shown as icons, no long tabs", "add a construction worker role, super simple, clock in with a photo, clock out, track salary; attendance counted by both worker and site manager for accuracy".
+- **Icon tiles** replace the long expand bars on the project page, site manager home, buyer home and Money page. Each tile shows an icon, one word and a number. All are closed at first. On a laptop the chosen tile opens under the row; on a phone it opens as a pop-up.
+- **Receipt categories:** 8 categories with icons. Picking one is required when logging a receipt or bill (one tap). Receipts and bills are shown in one folder per category with a total. Category chips filter the list. The accountant CSV has a new Category column.
+- **"Where it went"** (management): one bar per category for the month, with total and %. Tap a bar to open that category's receipts.
+- **Attendance by crew:** Check attendance shows one folder per crew (counts, waiting, "to look at", missing). The clock-in list and "Who's here" are grouped by crew too.
+- **Projects page** grouped into Running / Starting soon / Finished.
+- **New role: Construction worker.**
+  - Opens by scanning the site's **QR poster** (new "Site QR" tile on each project, with a Print poster button). The worker picks their name once.
+  - One giant **Clock in / Clock out** button. A simulated location check ("You are at the site, within 200 m") comes before the selfie.
+  - Shows "Site manager confirmed" or "Waiting for site manager", **where they work tomorrow**, **pay this month** (days, OT, checked and waiting amounts), day rate, OT rate, **pay day (7th)**, and a "My days" list.
+  - **"Something wrong? Tell site manager"** sends a report (wrong time, day missing, wrong OT, other) that the site manager sees on the attendance card, under the new "Reports" tile, and as a "Needs your attention" item for management.
+  - **6 languages** for the worker screen (English, Bahasa Malaysia, Bengali, Nepali, Indonesian, Burmese). All but English are drafts. Noto fonts load for Bengali, Nepali and Burmese scripts.
+- **Two-sided attendance:** workers with a phone clock themselves in; the site manager confirms with one tap (new "To confirm" tile and "Confirm all"). Workers without a phone are clocked in by the site manager with a photo, as before. Each card shows a match status. **"Approve N matched"** only approves the green ones; amber ones need a look.
+- **Settings:** new "flag when times differ by more than X minutes" and "pay day".
+- **Workers:** new "can clock in on own phone" and "language" fields.
+- Sample data: about 60% of workers have phones, each worker has a language, realistic mismatches and two open worker reports, and 4 more receipts so every category has entries.
+- Older saved data still works: missing fields are filled in on load, and receipts without a category are guessed from their description.
 
 ### v0.2.0 — 18 Nov 2026 — cleaner calendar, stock categories, aligned lists
 Client feedback: "bars should start on the same line", "calendar and side panel too cluttered, too many dots and colours", "stock needs categories and search, not an endless list".

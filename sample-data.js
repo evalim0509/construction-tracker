@@ -22,6 +22,16 @@
   }
   function hm(mins) { return pad(Math.floor(mins / 60)) + ":" + pad(mins % 60); }
 
+  // guess the worker's language from the name (sample data only)
+  function langFor(n) {
+    if (/^(Md\.|Rafiqul|Jamal|Nazrul|Shamim|Iqbal|Mizanur|Anwar Hossain|Abdul Malek)/.test(n)) return "bn";
+    if (/(Thapa|Gurung|Shrestha|Tamang|Bikash Rai|Lama|Hari Prasad|Ram Bahadur)/.test(n)) return "ne";
+    if (/(Santoso|Hartono|Kurniawan|Wijaya|Prasetyo|Susilo|Hartanto|Sudira|Saputra)/.test(n)) return "id";
+    if (/(Aung|Min Thu|Kyaw|Thein)/.test(n)) return "my";
+    if (/(Rahim|Hafiz|Ismail|Arif|Yusri|Azman|Sabri|Zulkifli|Nor Aini|Faisal)/.test(n)) return "ms";
+    return "en";
+  }
+
   function buildSampleData() {
     const now = new Date(); now.setHours(0, 0, 0, 0);
     const D = (n) => addDays(now, n);
@@ -63,7 +73,8 @@
     const crews = crewDefs.map((c) => ({ id: c.id, name: c.name, trade: c.trade, leaderId: c.id + "w0" }));
     const workers = [];
     crewDefs.forEach((c) => c.names.forEach((n, i) => {
-      workers.push({ id: c.id + "w" + i, name: n, crewId: c.id, dayRate: i === 0 ? 170 : 95 + Math.round(r() * 6) * 10, phone: "01" + Math.floor(10000000 + r() * 89999999) });
+      workers.push({ id: c.id + "w" + i, name: n, crewId: c.id, dayRate: i === 0 ? 170 : 95 + Math.round(r() * 6) * 10, phone: "01" + Math.floor(10000000 + r() * 89999999),
+        hasPhone: i === 0 || r() < 0.62, lang: langFor(n) });
     }));
 
     const assignments = [
@@ -146,6 +157,7 @@
 
     // ---- attendance: last 14 days + today ----
     const attendance = [];
+    const r2 = rnd(424242);
     const crewProject = (crewId, dateIso) => { const a = assignments.find((x) => x.crewId === crewId && x.from <= dateIso && x.to >= dateIso); return a ? a.projectId : null; };
     for (let back = 14; back >= 0; back--) {
       const dIso = D(-back);
@@ -171,51 +183,78 @@
         if (back >= 2 && rec.status === "approved" && r() < 0.06) {
           rec.adjust = { normal: 8, ot: 1, half: false, by: "site", reason: "Stayed back 1 hour only, forgot to clock out." };
         }
+        // the worker's own clock-in on their phone (second count)
+        if (w.hasPhone) {
+          const jit = () => Math.floor(r2() * 13) - 6;
+          rec.self = { in: hm(inM + jit()), out: back === 0 ? null : hm(outM + jit()), inPhoto: "demo-face:" + w.id, outPhoto: back === 0 ? null : "demo-face:" + w.id, inLoc: "on site", outLoc: back === 0 ? null : "on site" };
+          const roll2 = r2();
+          if (back <= 1 && roll2 < 0.08) rec.self.in = hm(inM - 25 - Math.floor(r2() * 20));            // times differ
+          else if (back === 1 && roll2 < 0.13) { rec.in = null; rec.inPhoto = null; rec.out = null; rec.outPhoto = null; } // manager forgot to confirm
+          else if (back === 1 && roll2 < 0.17) rec.self = null;                                           // worker forgot
+          else if (back === 0 && roll2 < 0.3) { rec.in = null; rec.inPhoto = null; }                       // waiting for the site manager today
+        }
         attendance.push(rec);
       });
+    }
+
+    // ---- reports from workers ----
+    const disputes = [];
+    const lastWork = (minBack) => { for (let b = minBack; b < 10; b++) { const d = D(-b); if (new Date(now.getTime() - b * 86400000).getDay() !== 0) return d; } return D(-minBack); };
+    const yd = lastWork(1), d3 = lastWork(3);
+    const r1 = attendance.find((a) => a.projectId === "p1" && a.date === yd && a.self && a.in && workers.find((w) => w.id === a.workerId).crewId === "c1");
+    if (r1) disputes.push({ id: "ds1", workerId: r1.workerId, date: yd, projectId: "p1", reason: "Wrong OT", note: "I stayed until 8pm to finish the formwork.", status: "open", at: new Date().toISOString() });
+    const missW = workers.find((w) => w.crewId === "c4" && w.hasPhone && w.id !== "c4w0");
+    if (missW) {
+      for (let i = attendance.length - 1; i >= 0; i--) if (attendance[i].workerId === missW.id && attendance[i].date === d3) attendance.splice(i, 1);
+      disputes.push({ id: "ds2", workerId: missW.id, date: d3, projectId: "p1", reason: "Day missing", note: "I was on site but my phone battery died.", status: "open", at: new Date().toISOString() });
     }
 
     // ---- money ----
     const money = [];
     const mo = (o) => money.push(Object.assign({ id: "mo" + money.length, photo: null, supplier: "", ref: "", note: "", by: "boss" }, o));
     const receipts = [
-      [-1, 1250, "Cement, 50 bags", "p1", "Bank transfer", "Seng Huat Hardware", "site"],
-      [-1, 86, "Lunch for crew (overtime)", "p1", "Cash", "Restoran Ali Maju", "site"],
-      [-2, 420, "Diesel for generator", "p2", "Card", "Petrol station", "site"],
-      [-3, 18000, "Crane rental, 2 weeks", "p1", "Bank transfer", "Kuat Crane Services", "boss"],
-      [-4, 3560, "Safety boots and helmets", "", "Card", "Safe Gear Supplies", "buyer"],
-      [-5, 42800, "Ready-mix concrete G30, 160 m³", "p1", "Bank transfer", "Batu Mix Concrete Sdn Bhd", "boss"],
-      [-6, 64.5, "Toll and parking", "p3", "Cash", "", "site"],
-      [-7, 9600, "Scaffolding rental", "p2", "Bank transfer", "Tegap Scaffold", "buyer"],
-      [-8, 215, "Drill bits and cutting discs", "p3", "Cash", "Seng Huat Hardware", "site"],
-      [-9, 27400, "Steel I-beams, 30 pcs", "p2", "Bank transfer", "Mega Steel Trading", "buyer"],
-      [-10, 1180, "Water truck", "p4", "Cash", "Air Bersih Transport", "site"],
-      [-11, 6800, "Paint, 20 pails", "p3", "Bank transfer", "Warna Jaya Paints", "buyer"],
-      [-12, 350, "Diesel for excavator", "p4", "Cash", "Petrol station", "site"],
-      [-14, 15200, "Rebar Y12, 400 bars", "", "Bank transfer", "Mega Steel Trading", "buyer"],
-      [-15, 2750, "Electrical cable and fittings", "p1", "Card", "Elektrik Maju", "buyer"],
-      [-17, 98, "Drinking water for site", "p2", "Cash", "", "site"],
-      [-19, 12600, "Excavator rental", "p4", "Bank transfer", "Kuat Crane Services", "boss"],
-      [-22, 4300, "Roof sheets transport", "p3", "Bank transfer", "Laju Lorry Services", "buyer"],
-      [-25, 1500, "Site office electricity deposit", "p4", "Bank transfer", "", "boss"],
-      [-28, 34500, "Metal roof sheets, 300 pcs", "", "Bank transfer", "Atap Steel Industries", "buyer"],
-      [-33, 7400, "Plywood formwork", "p1", "Bank transfer", "Kayu Emas Timber", "buyer"],
-      [-38, 22100, "Ready-mix concrete G25", "p2", "Bank transfer", "Batu Mix Concrete Sdn Bhd", "boss"],
-      [-44, 530, "Generator repair", "p2", "Cash", "Bengkel Kuasa", "site"]
+      [-1, 1250, "Cement, 50 bags", "p1", "Bank transfer", "Seng Huat Hardware", "site", "materials"],
+      [-1, 86, "Lunch for crew (overtime)", "p1", "Cash", "Restoran Ali Maju", "site", "site"],
+      [-2, 420, "Diesel for generator", "p2", "Card", "Petrol station", "site", "transport"],
+      [-3, 18000, "Crane rental, 2 weeks", "p1", "Bank transfer", "Kuat Crane Services", "boss", "rental"],
+      [-4, 3560, "Safety boots and helmets", "", "Card", "Safe Gear Supplies", "buyer", "tools"],
+      [-5, 42800, "Ready-mix concrete G30, 160 m³", "p1", "Bank transfer", "Batu Mix Concrete Sdn Bhd", "boss", "materials"],
+      [-6, 64.5, "Toll and parking", "p3", "Cash", "", "site", "transport"],
+      [-6, 14500, "Plastering subcontractor, week 2", "p3", "Bank transfer", "Kemas Plaster Works", "boss", "subcon"],
+      [-7, 9600, "Scaffolding rental", "p2", "Bank transfer", "Tegap Scaffold", "buyer", "rental"],
+      [-8, 215, "Drill bits and cutting discs", "p3", "Cash", "Seng Huat Hardware", "site", "tools"],
+      [-9, 27400, "Steel I-beams, 30 pcs", "p2", "Bank transfer", "Mega Steel Trading", "buyer", "materials"],
+      [-10, 1180, "Water truck", "p4", "Cash", "Air Bersih Transport", "site", "site"],
+      [-11, 6800, "Paint, 20 pails", "p3", "Bank transfer", "Warna Jaya Paints", "buyer", "materials"],
+      [-12, 350, "Diesel for excavator", "p4", "Cash", "Petrol station", "site", "transport"],
+      [-13, 380, "Printer ink and paper", "", "Card", "Kedai Alat Tulis Ria", "boss", "office"],
+      [-14, 15200, "Rebar Y12, 400 bars", "", "Bank transfer", "Mega Steel Trading", "buyer", "materials"],
+      [-15, 2750, "Electrical cable and fittings", "p1", "Card", "Elektrik Maju", "buyer", "materials"],
+      [-16, 650, "Building permit renewal", "p2", "Bank transfer", "Local council", "boss", "utilities"],
+      [-17, 98, "Drinking water for site", "p2", "Cash", "", "site", "site"],
+      [-19, 12600, "Excavator rental", "p4", "Bank transfer", "Kuat Crane Services", "boss", "rental"],
+      [-20, 9800, "Electrical subcontractor, first payment", "p1", "Bank transfer", "Voltec Wiring Sdn Bhd", "boss", "subcon"],
+      [-22, 4300, "Roof sheets transport", "p3", "Bank transfer", "Laju Lorry Services", "buyer", "transport"],
+      [-25, 1500, "Site office electricity deposit", "p4", "Bank transfer", "", "boss", "utilities"],
+      [-28, 34500, "Metal roof sheets, 300 pcs", "", "Bank transfer", "Atap Steel Industries", "buyer", "materials"],
+      [-33, 7400, "Plywood formwork", "p1", "Bank transfer", "Kayu Emas Timber", "buyer", "materials"],
+      [-38, 22100, "Ready-mix concrete G25", "p2", "Bank transfer", "Batu Mix Concrete Sdn Bhd", "boss", "materials"],
+      [-44, 530, "Generator repair", "p2", "Cash", "Bengkel Kuasa", "site", "tools"]
     ];
-    receipts.forEach(([d, amt, what, pid, paidBy, supplier, by], i) => mo({
-      dir: "out", status: "paid", date: D(d), amount: amt, what, projectId: pid || null, paidBy, supplier, by,
+    receipts.forEach(([d, amt, what, pid, paidBy, supplier, by, cat], i) => mo({
+      dir: "out", status: "paid", date: D(d), amount: amt, what, projectId: pid || null, paidBy, supplier, by, cat,
       ref: amt > 1000 ? "INV-" + (4100 + i * 7) : "", photo: "demo-receipt:" + i
     }));
     // bills to pay
-    [[5, 86400, "Steel I-beams and bolts", "p2", "Mega Steel Trading", "INV-4471"],
-     [3, 18000, "Crane rental, next 2 weeks", "p1", "Kuat Crane Services", "INV-0932"],
-     [9, 42800, "Ready-mix concrete G30", "p1", "Batu Mix Concrete Sdn Bhd", "INV-2210"],
-     [14, 9600, "Scaffolding rental", "p2", "Tegap Scaffold", "INV-118"],
-     [7, 3200, "Site electricity (temporary supply)", "p4", "Electricity provider", "ACC-55102"],
-     [-2, 6100, "Roofing screws and flashing", "p3", "Atap Steel Industries", "INV-7781"],
-     [24, 61200, "Metal roof sheets, Shah Alam", "p1", "Atap Steel Industries", "QUO-7802"]
-    ].forEach(([d, amt, what, pid, supplier, ref]) => mo({ dir: "out", status: "expected", date: D(d), amount: amt, what, projectId: pid, supplier, ref, paidBy: "Bank transfer" }));
+    [[5, 86400, "Steel I-beams and bolts", "p2", "Mega Steel Trading", "INV-4471", "materials"],
+     [3, 18000, "Crane rental, next 2 weeks", "p1", "Kuat Crane Services", "INV-0932", "rental"],
+     [9, 42800, "Ready-mix concrete G30", "p1", "Batu Mix Concrete Sdn Bhd", "INV-2210", "materials"],
+     [14, 9600, "Scaffolding rental", "p2", "Tegap Scaffold", "INV-118", "rental"],
+     [7, 3200, "Site electricity (temporary supply)", "p4", "Electricity provider", "ACC-55102", "utilities"],
+     [-2, 6100, "Roofing screws and flashing", "p3", "Atap Steel Industries", "INV-7781", "materials"],
+     [10, 22000, "Electrical subcontractor, second payment", "p1", "Voltec Wiring Sdn Bhd", "PC-002", "subcon"],
+     [24, 61200, "Metal roof sheets, Shah Alam", "p1", "Atap Steel Industries", "QUO-7802", "materials"]
+    ].forEach(([d, amt, what, pid, supplier, ref, cat]) => mo({ dir: "out", status: "expected", date: D(d), amount: amt, what, projectId: pid, supplier, ref, cat, paidBy: "Bank transfer" }));
     // client payments
     [[12, 640000, "Progress claim #5", "p1", "Sinar Packaging Sdn Bhd"],
      [20, 410000, "Progress claim #3", "p2", "Pelabuhan Jaya Logistics"],
@@ -233,11 +272,11 @@
       sample: true,
       createdAt: new Date().toISOString(),
       company: { name: "GCL Builders" },
-      people: { boss: { name: "Mr. Lim" }, site: { name: "Faizal", siteId: "p1" }, buyer: { name: "Mei Ling" } },
+      people: { boss: { name: "Mr. Lim" }, site: { name: "Faizal", siteId: "p1" }, buyer: { name: "Mei Ling" }, worker: { siteId: null, workerId: null, lang: "en" } },
       role: "boss",
-      settings: { normalHours: 8, breakHours: 1, breakAfter: 5, otRate: 1.5, halfDayUnder: 5, photoKeepDays: 30, sundayOff: true },
+      settings: { normalHours: 8, breakHours: 1, breakAfter: 5, otRate: 1.5, halfDayUnder: 5, photoKeepDays: 30, sundayOff: true, matchMinutes: 15, payDay: 7, geofenceM: 200 },
       flags: { privacySeen: false },
-      projects, crews, workers, assignments, materials, needs, moves, attendance, money
+      projects, crews, workers, assignments, materials, needs, moves, attendance, money, disputes
     };
   }
 
@@ -245,11 +284,11 @@
     return {
       version: 1, sample: false, createdAt: new Date().toISOString(),
       company: { name: "My Company" },
-      people: { boss: { name: "Boss" }, site: { name: "Site manager", siteId: null }, buyer: { name: "Buyer" } },
+      people: { boss: { name: "Boss" }, site: { name: "Site manager", siteId: null }, buyer: { name: "Buyer" }, worker: { siteId: null, workerId: null, lang: "en" } },
       role: "boss",
-      settings: { normalHours: 8, breakHours: 1, breakAfter: 5, otRate: 1.5, halfDayUnder: 5, photoKeepDays: 30, sundayOff: true },
+      settings: { normalHours: 8, breakHours: 1, breakAfter: 5, otRate: 1.5, halfDayUnder: 5, photoKeepDays: 30, sundayOff: true, matchMinutes: 15, payDay: 7, geofenceM: 200 },
       flags: { privacySeen: false },
-      projects: [], crews: [], workers: [], assignments: [], materials: [], needs: [], moves: [], attendance: [], money: []
+      projects: [], crews: [], workers: [], assignments: [], materials: [], needs: [], moves: [], attendance: [], money: [], disputes: []
     };
   }
 
