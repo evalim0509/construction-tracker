@@ -686,6 +686,24 @@ details.arow.focus > summary { box-shadow: inset 3px 0 0 var(--blue); padding-le
 .crew-head + .card.alist { margin-top: 6px; }
 .card.alist + .crew-head { margin-top: 18px; }
 
+
+/* ---------- History (audit trail), undo, rejected bin (v0.5) ---------- */
+.toast.has-undo { pointer-events: auto; }
+.toast-undo { border: 0; background: rgba(255,255,255,.14); color: #fff; border-radius: 6px; padding: 7px 12px; font-weight: 600; display: inline-flex; align-items: center; gap: 6px; margin-left: 4px; flex: none; }
+.toast-undo svg { width: 16px; height: 16px; color: #fff !important; }
+.toast-undo:hover { background: rgba(255,255,255,.24); }
+.au-row { display: flex; align-items: flex-start; gap: 10px; padding: 10px 0; border-top: 1px solid var(--line); font-size: 14.5px; line-height: 1.4; }
+.au-row:first-child, .au-day + .au-row { border-top: 0; }
+.au-time { color: var(--muted); width: 44px; flex: none; font-size: 13.5px; padding-top: 1px; }
+.au-ic { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; flex: none; background: var(--bg); color: var(--ink-2); }
+.au-ic svg { width: 12px; height: 12px; }
+.au-worker { background: var(--teal-soft); color: var(--teal-ink); }
+.au-site { background: var(--blue-soft); color: var(--blue); }
+.au-text b { font-weight: 600; }
+.au-list .au-day { padding-top: 10px; }
+.au-mini { border-top: 1px dashed var(--line); padding-top: 8px; }
+.au-mini .au-row { font-size: 13.5px; padding: 6px 0; border-top: 0; }
+
 /* ---------- Bottom nav (phones) ---------- */
 .bottomnav { display: none; }
 .fab { display: none; }
@@ -757,6 +775,9 @@ details.arow.focus > summary { box-shadow: inset 3px 0 0 var(--blue); padding-le
   .day-panel { margin-top: 0; }
   .mobile-only { display: flex !important; }
   .att-controls { gap: 8px; }
+  .au-time { width: 40px; }
+  .toast.has-undo { left: 12px; right: 12px; transform: none; max-width: none; }
+  .toast.has-undo.show { transform: none; }
   .att-controls select.pill-select { width: auto; flex: 1; min-width: 0; max-width: none; }
   .date-step b { min-width: 64px; font-size: 15px; }
   .arow-body { padding-left: 0; }

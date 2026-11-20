@@ -209,6 +209,25 @@
       disputes.push({ id: "ds2", workerId: missW.id, date: d3, projectId: "p1", reason: "Day missing", note: "I was on site but my phone battery died.", status: "open", at: new Date().toISOString() });
     }
 
+    // ---- history (audit trail) ----
+    const audit = [];
+    const nameOf = (id) => (workers.find((w) => w.id === id) || {}).name || "";
+    const nextDay = (d) => { const x = new Date(d + "T00:00:00"); x.setDate(x.getDate() + 1); return iso(x); };
+    const addA = (o) => audit.push(Object.assign({ id: "au" + audit.length, at: new Date().toISOString() }, o));
+    const recent = [D(0), lastWork(1), lastWork(2)];
+    attendance.forEach((a) => {
+      const base = { workerId: a.workerId, recId: a.id, projectId: a.projectId, forDate: a.date };
+      if (a.status === "rejected") { a.rejectReason = a.note || "Not on site"; addA(Object.assign({ date: nextDay(a.date), time: "09:12", by: "site", byName: "Faizal", action: "reject", reason: a.rejectReason }, base)); }
+      if (a.adjust) addA(Object.assign({ date: nextDay(a.date), time: "09:05", by: "site", byName: "Faizal", action: "change", value: "OT → " + a.adjust.ot + "h", reason: a.adjust.reason }, base));
+      if (a.projectId !== "p1" || recent.indexOf(a.date) < 0) return;
+      if (a.self && a.self.in) addA(Object.assign({ date: a.date, time: a.self.in, by: "worker", byName: nameOf(a.workerId), action: "self-in", value: a.self.in }, base));
+      if (a.self && a.self.out) addA(Object.assign({ date: a.date, time: a.self.out, by: "worker", byName: nameOf(a.workerId), action: "self-out", value: a.self.out }, base));
+      if (a.in && a.inPhoto) addA(Object.assign({ date: a.date, time: a.in, by: "site", byName: "Faizal", action: "photo-in", value: a.in }, base));
+      if (a.status === "approved" && a.date === recent[2]) addA(Object.assign({ date: nextDay(a.date), time: "08:4" + (audit.length % 10), by: "site", byName: "Faizal", action: "approve", value: "full day" }, base));
+    });
+    disputes.forEach((d) => addA({ date: yd, time: "19:1" + (audit.length % 10), by: "worker", byName: nameOf(d.workerId), action: "report", workerId: d.workerId, projectId: d.projectId, forDate: d.date, value: d.reason + (d.note ? ", “" + d.note + "”" : "") }));
+    audit.sort((a, b) => (b.date + b.time).localeCompare(a.date + a.time));
+
     // ---- notifications (what the site manager sees under the bell) ----
     const notifications = [];
     const todayIso = D(0);
@@ -285,7 +304,7 @@
       role: "boss",
       settings: { normalHours: 8, breakHours: 1, breakAfter: 5, otRate: 1.5, halfDayUnder: 5, photoKeepDays: 30, sundayOff: true, matchMinutes: 15, payDay: 7, geofenceM: 200 },
       flags: { privacySeen: false },
-      projects, crews, workers, assignments, materials, needs, moves, attendance, money, disputes, notifications
+      projects, crews, workers, assignments, materials, needs, moves, attendance, money, disputes, notifications, audit
     };
   }
 
@@ -297,7 +316,7 @@
       role: "boss",
       settings: { normalHours: 8, breakHours: 1, breakAfter: 5, otRate: 1.5, halfDayUnder: 5, photoKeepDays: 30, sundayOff: true, matchMinutes: 15, payDay: 7, geofenceM: 200 },
       flags: { privacySeen: false },
-      projects: [], crews: [], workers: [], assignments: [], materials: [], needs: [], moves: [], attendance: [], money: [], disputes: [], notifications: []
+      projects: [], crews: [], workers: [], assignments: [], materials: [], needs: [], moves: [], attendance: [], money: [], disputes: [], notifications: [], audit: []
     };
   }
 

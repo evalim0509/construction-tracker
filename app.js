@@ -106,6 +106,9 @@
     flag: '<path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1zM4 22v-7"/>',
     qr: '<rect width="5" height="5" x="3" y="3" rx="1"/><rect width="5" height="5" x="16" y="3" rx="1"/><rect width="5" height="5" x="3" y="16" rx="1"/><path d="M21 16h-3a2 2 0 0 0-2 2v3M21 21v.01M12 7v3a2 2 0 0 1-2 2H7M3 12h.01M12 3h.01M12 16v.01M16 12h1M21 12v.01M12 21v-1"/>',
     phoneoff: '<rect x="5" y="2" width="14" height="20" rx="2"/><path d="M12 18h.01M3 3l18 18"/>',
+    history: '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5M12 7v5l4 2"/>',
+    bin: '<path d="M3 6h18M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6M10 11v6M14 11v6M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>',
+    undo: '<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/>',
     bell: '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.94 1.94 0 0 0 3.4 0"/>',
     globe: '<circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20M2 12h20"/>',
     logo: '<path d="M5 20V11l5 3.4V11l5 3.4V6h4v14z" fill="#fff" stroke="none"/>'
@@ -126,6 +129,7 @@
   function migrate() {
     S.disputes = S.disputes || [];
     S.notifications = S.notifications || [];
+    S.audit = S.audit || [];
     S.people.worker = S.people.worker || { siteId: null, workerId: null, lang: "en" };
     S.settings = Object.assign({ matchMinutes: 15, payDay: 7, geofenceM: 200 }, S.settings);
   }
@@ -340,6 +344,58 @@
     if (r.date < today() && !!r.out !== !!s.out) return { key: "out", label: "Clock-out on one side only", cls: "warn", flag: true };
     return { key: "ok", label: "Matched", cls: "good" };
   }
+  /* History (audit trail). Append-only: entries are never edited or deleted, and undo adds a new entry.
+     Stores who did what, to which worker's day, when, with the before/after values and the reason. */
+  function actor() {
+    const r = role();
+    if (r === "worker") { const w = me(); return { by: "worker", byName: w ? w.name : "Worker", byWorker: w ? w.id : null }; }
+    return { by: r, byName: (S.people[r] || {}).name || ROLE_LABEL[r] };
+  }
+  function log(action, o) {
+    const e = Object.assign({ id: uid("au"), at: new Date().toISOString(), date: today(), time: nowHM(), action }, actor(), o || {});
+    S.audit.unshift(e);
+    return e;
+  }
+  function auditText(a, forWorker) {
+    const wn = worker(a.workerId) ? worker(a.workerId).name : "a worker";
+    const w = forWorker ? "your" : esc(wn) + "'s";
+    const d = a.forDate ? " (" + fmtDay(a.forDate) + ")" : "";
+    const rs = a.reason ? ". Reason: “" + esc(a.reason) + "”" : "";
+    const v = a.value ? esc(a.value) : "";
+    switch (a.action) {
+      case "self-in": return "clocked in with a selfie at " + v;
+      case "self-out": return "clocked out with a selfie at " + v;
+      case "photo-in": return "clocked in " + (forWorker ? "you" : esc(wn)) + " with a photo at " + v;
+      case "photo-out": return "clocked out " + (forWorker ? "you" : esc(wn)) + " with a photo at " + v;
+      case "confirm-in": return "confirmed " + w + " selfie clock-in (" + v + ")";
+      case "confirm-out": return "confirmed " + w + " selfie clock-out (" + v + ")";
+      case "approve": return "approved " + w + " day" + d + (v ? ": " + v : "");
+      case "reject": return "rejected " + w + " day" + d + rs;
+      case "restore": return "restored " + w + " day" + d + " from Rejected";
+      case "change": return "changed " + w + " day" + d + ": " + v + rs;
+      case "add": return "added " + w + " day" + d + " by hand: " + v + rs;
+      case "auto": return "set " + w + " hours" + d + " back to automatic";
+      case "report": return "reported a problem with " + fmtDay(a.forDate) + ": " + v;
+      case "sorted": return "marked " + w + " report" + d + " as sorted";
+      case "undo": return "undid: " + v;
+      default: return v;
+    }
+  }
+  const ROLE_SHORT = { boss: "management", site: "site manager", buyer: "buyer", worker: "worker" };
+  function auditRow(a, forWorker) {
+    const mine = forWorker && a.by === "worker";
+    return '<div class="au-row"><span class="au-time num">' + esc(a.time) + '</span><span class="au-ic au-' + a.by + '">' + icon(a.action === "undo" ? "undo" : a.action === "reject" ? "x" : a.action === "report" ? "flag" : a.by === "worker" ? "camera" : "check") + "</span>" +
+      '<span class="au-text">' + (mine ? "<b>You</b> " : "<b>" + esc(a.byName) + '</b> <span class="muted">(' + ROLE_SHORT[a.by] + ")</span> ") + auditText(a, forWorker) + "</span></div>";
+  }
+  // snapshot for Undo (attendance, reports and notifications only; the history itself is never rolled back)
+  const snapshot = () => JSON.stringify({ attendance: S.attendance, disputes: S.disputes, notifications: S.notifications });
+  function done(msg, snap, entries, ic) {
+    save(); render();
+    if (ui.sheet && ui.sheet.type === "clock") renderSheet();
+    const label = entries && entries.length ? auditText(entries[0]).replace(/<[^>]+>/g, "") + (entries.length > 1 ? " and " + (entries.length - 1) + " more" : "") : msg;
+    toast(msg, ic, snap ? { snap, label } : null);
+  }
+
   // Notifications: to "site" (site manager + management) or to "worker" (one worker)
   function notify(n) { S.notifications.unshift(Object.assign({ id: uid("nt"), at: new Date().toISOString(), date: today(), time: nowHM(), read: false }, n)); if (S.notifications.length > 200) S.notifications.length = 200; }
   function myNotes() {
@@ -472,6 +528,7 @@
   function menuHTML() {
     return '<div class="menu" role="menu">' +
       '<a href="#/attendance" role="menuitem">' + icon("clock") + "Check attendance</a>" +
+      (role() === "boss" || role() === "site" ? '<a href="#/history" role="menuitem">' + icon("history") + 'History</a><a href="#/bin" role="menuitem">' + icon("bin") + "Rejected days</a>" : "") +
       '<a href="#/team" role="menuitem">' + icon("users") + "Workers &amp; crews</a>" +
       '<a href="#/settings" role="menuitem">' + icon("sliders") + "Settings</a>" +
       "<hr>" +
@@ -485,7 +542,7 @@
     const main = $("#main");
     const r = route();
     if (role() === "worker") { main.innerHTML = viewWorker(); after(); if (ui.sheet && /^(wclock|wreport)$/.test(ui.sheet.type)) renderSheet(); return; }
-    const views = { today: viewToday, calendar: viewCalendar, projects: viewProjects, project: viewProject, stock: viewStock, money: viewMoney, attendance: viewAttendance, team: viewTeam, settings: viewSettings };
+    const views = { history: viewHistory, bin: viewBin, today: viewToday, calendar: viewCalendar, projects: viewProjects, project: viewProject, stock: viewStock, money: viewMoney, attendance: viewAttendance, team: viewTeam, settings: viewSettings };
     main.innerHTML = (views[r.name] || viewToday)(r.id);
     after();
     if (ui.sheet && ui.sheet.type === "panel") renderSheet();
@@ -1154,14 +1211,46 @@
       (r.confirmedIn ? '<div class="small muted">Selfie times confirmed by site manager at ' + esc(r.confirmedIn) + (r.confirmedOut ? " and " + esc(r.confirmedOut) : "") + "</div>" : both ? '<div class="small muted">Worker ' + esc(s.in) + (s.out ? "–" + esc(s.out) : "") + ", site manager " + esc(r.in) + (r.out ? "–" + esc(r.out) : "") + "</div>" : "") +
       (done && h ? '<div class="small">' + esc(hoursText(h)) + (h.changed ? ' <span class="muted">(changed by site manager: ' + esc(r.adjust.reason || "") + ")</span>" : "") + (can.seePay() && r.status !== "rejected" ? ' <span class="muted">Pay ' + RM(Math.round(payFor(r))) + "</span>" : "") + "</div>" : "") +
       (dsp ? '<div class="report">' + icon("flag") + "<div><b>" + esc(w.name.split(" ")[0]) + " says: " + esc(dsp.reason) + "</b>" + (dsp.note ? "<br>“" + esc(dsp.note) + "”" : "") + "</div>" + (can.approve() ? '<button class="btn btn-sm" data-action="dispute-done" data-id="' + dsp.id + '">Sorted</button>' : "") + "</div>" : "") +
+      (r.status === "rejected" && r.rejectReason ? '<div class="report">' + icon("x") + "<div><b>Rejected:</b> " + esc(r.rejectReason) + "</div></div>" : "") +
       (r.note ? '<div class="small muted">' + esc(r.note) + "</div>" : "") +
-      (can.approve() ? '<div class="row wrap" style="gap:8px">' + (approveInBody ? '<button class="btn btn-sm btn-soft" data-action="att-ok" data-id="' + r.id + '">Approve</button>' : "") +
+      (r.status === "rejected" && can.approve() ? '<div class="row wrap" style="gap:8px"><button class="btn btn-sm btn-primary" data-action="att-restore" data-id="' + r.id + '">' + icon("undo") + "Restore</button></div>" :
+      can.approve() ? '<div class="row wrap" style="gap:8px">' + (approveInBody ? '<button class="btn btn-sm btn-soft" data-action="att-ok" data-id="' + r.id + '">Approve</button>' : "") +
         '<button class="btn btn-sm btn-soft" data-action="att-edit" data-id="' + r.id + '">' + icon("edit") + "Change</button>" +
-        (r.status !== "rejected" ? '<button class="btn btn-sm btn-danger" data-action="att-no" data-id="' + r.id + '">' + icon("x") + "Reject</button>" : "") + "</div>" : "");
+        '<button class="btn btn-sm btn-danger" data-action="att-no" data-id="' + r.id + '">' + icon("x") + "Reject</button></div>" : "") +
+      recHistory(r);
     return '<details class="arow' + (ui.attFocus === r.workerId ? " focus" : "") + '" data-fold="' + fid + '"' + (ui.open.has(fid) || ui.attFocus === r.workerId ? " open" : "") + "><summary>" +
       '<span class="arow-pic">' + img(e.inPhoto, "", w.name) + "</span>" +
       '<span class="li-main"><span class="arow-name">' + esc(w.name) + icons + '</span><span class="arow-sub">' + esc(time) + " " + chip(st.label, st.cls) + "</span></span>" +
       btn + '</summary><div class="arow-body">' + body + "</div></details>";
+  }
+
+  function recHistory(r) {
+    const list = S.audit.filter((a) => a.recId === r.id || (a.workerId === r.workerId && a.forDate === r.date && !a.recId));
+    if (!list.length) return "";
+    return '<div class="au-mini"><div class="day-sec-title">' + icon("history", ' style="width:14px;height:14px;vertical-align:-2px"') + " History</div>" + list.slice(0, 8).map((a) => auditRow(a)).join("") + "</div>";
+  }
+
+  /* ---------- History page (audit trail) ---------- */
+  function viewHistory() {
+    if (!(role() === "boss" || role() === "site")) return '<div class="card">' + empty("History is for management and site managers.") + "</div>";
+    const f = ui.auFilter || "all", q = (ui.auQ || "").toLowerCase();
+    const list = S.audit.filter((a) => (f === "all" || a.by === f) && (!q || ((worker(a.workerId) || {}).name || "").toLowerCase().includes(q) || (a.byName || "").toLowerCase().includes(q)));
+    const chipB = (k, l) => '<button class="fchip ' + (f === k ? "on" : "") + '" data-action="au-filter" data-f="' + k + '">' + l + "</button>";
+    const days = {};
+    list.slice(0, 300).forEach((a) => { (days[a.date] = days[a.date] || []).push(a); });
+    return '<div class="page-head"><div><h1 class="page-title">History' + helpBtn("Every attendance action by site managers and workers: clock-ins, confirmations, approvals, changes, rejections, restores and undos, with the reason. Entries can never be edited or deleted, so workers are protected: any change to their pay is on record.") + "</h1></div>" +
+      (can.seePay() ? '<button class="btn btn-sm" data-action="au-csv">' + icon("download") + "Download</button>" : "") + "</div>" +
+      '<div class="search">' + icon("search") + '<input class="input" type="search" placeholder="Search a worker or person" value="' + esc(ui.auQ || "") + '" data-input="auQ" aria-label="Search history"></div>' +
+      '<div class="chips mt-12">' + chipB("all", "Everyone") + chipB("site", "Site manager") + chipB("worker", "Workers") + chipB("boss", "Management") + "</div>" +
+      (Object.keys(days).length ? Object.keys(days).sort().reverse().map((d) => '<div class="crew-head">' + (d === today() ? "Today" : fmtDayLong(d)) + '<span class="muted">' + days[d].length + '</span></div><div class="card alist au-list">' + days[d].map((a) => auditRow(a)).join("") + "</div>").join("") : '<div class="card">' + empty("Nothing recorded yet.") + "</div>");
+  }
+
+  /* ---------- Rejected bin ---------- */
+  function viewBin() {
+    if (!(role() === "boss" || role() === "site")) return '<div class="card">' + empty("Only for management and site managers.") + "</div>";
+    const list = S.attendance.filter((a) => a.status === "rejected" && (role() === "boss" || a.projectId === siteId())).sort((a, b) => b.date.localeCompare(a.date));
+    return '<div class="page-head"><div><h1 class="page-title">Rejected days' + helpBtn("Days the site manager rejected. They are not paid, but never deleted. Restore a day if it was rejected by mistake; it goes back to waiting for a check. Every reject and restore is in History.") + "</h1></div></div>" +
+      (list.length ? '<div class="card alist">' + list.map((r) => { const w = worker(r.workerId), e = eff(r); return '<div class="li">' + '<span class="arow-pic">' + img(e.inPhoto, "", w ? w.name : "") + '</span><div class="li-main"><div class="li-title">' + esc(w ? w.name : "?") + '</div><div class="li-sub">' + fmtDay(r.date) + ", " + esc(project(r.projectId) ? project(r.projectId).name : "") + (r.rejectReason ? ". “" + esc(r.rejectReason) + "”" : "") + "</div></div>" + (can.approve() ? '<button class="btn btn-sm btn-primary" data-action="att-restore" data-id="' + r.id + '">' + icon("undo") + "Restore</button>" : "") + "</div>"; }).join("") + "</div>" : '<div class="card">' + empty("No rejected days.") + "</div>");
   }
 
   // one short line listing other days that still need a look (waiting records and/or worker reports)
@@ -1184,15 +1273,17 @@
     const recs = S.attendance.filter((a) => a.projectId === sid && a.date === d).sort((a, b) => focus(a) - focus(b) || order(a) - order(b));
     const expected = expectedWorkers(sid, d);
     const missing = expected.filter((w) => !recs.some((r) => r.workerId === w.id));
-    const todo = recs.filter(isTodo);
+    const rejected = recs.filter((r) => r.status === "rejected");
+    const live = recs.filter((r) => r.status !== "rejected");
+    const todo = live.filter(isTodo);
     const easy = recs.filter((r) => r.status === "waiting" && isDone(r) && !matchOf(r).flag && !needsConfirm(r));
     let tab = ui.attFilter;
-    if (["todo", "all", "missing"].indexOf(tab) < 0) tab = todo.length ? "todo" : "all";
+    if (["todo", "all", "missing", "rejected"].indexOf(tab) < 0) tab = todo.length ? "todo" : "all";
     const otherReports = S.disputes.filter((x) => x.status === "open" && x.projectId === sid && x.date !== d);
 
     const controls = '<div class="att-controls"><div class="date-step"><button class="icon-btn sm" data-action="att-day" data-step="-1" aria-label="Previous day">' + icon("left") + '</button><b>' + (d === today() ? "Today" : fmtDay(d)) + '</b><button class="icon-btn sm" data-action="att-day" data-step="1" aria-label="Next day"' + (d >= today() ? " disabled" : "") + ">" + icon("right") + "</button></div>" +
       '<select class="input pill-select" data-change="attSite" aria-label="Site">' + S.projects.map((x) => '<option value="' + x.id + '"' + (x.id === sid ? " selected" : "") + ">" + esc(x.name) + "</option>").join("") + "</select></div>";
-    const tabs = '<div class="tiles att-tabs">' + [["todo", "To do", todo.length, todo.length > 0], ["all", "Everyone", recs.length], ["missing", "Not in", missing.length]].map((x) =>
+    const tabs = '<div class="tiles att-tabs">' + [["todo", "To do", todo.length, todo.length > 0], ["all", "Everyone", live.length], ["missing", "Not in", missing.length], ["rejected", "Rejected", rejected.length]].map((x) =>
       '<button class="tile' + (tab === x[0] ? " on" : "") + (x[3] ? " warn" : "") + '" data-action="att-filter" data-f="' + x[0] + '"><span class="tile-label">' + x[1] + '</span><span class="tile-n">' + x[2] + "</span></button>").join("") + "</div>";
     const wages = can.seePay() ? '<p class="att-wages small"><span class="muted">Wages for the day (approved)</span> <b class="num">' + RM(Math.round(sum(recs.filter((r) => r.status === "approved"), payFor))) + "</b></p>" : "";
     const missingRow = (w) => { const dsp = openDispute(w.id, d); return '<div class="li">' + avatar(w) + '<div class="li-main"><div class="li-title">' + esc(w.name) + (dsp ? '<span class="mini-ic warn" title="Worker report: ' + esc(dsp.reason) + '">' + icon("flag") + "</span>" : "") + '</div><div class="li-sub">' + esc(crew(w.crewId) ? crew(w.crewId).name : "") + "</div></div>" + (can.approve() ? '<button class="btn btn-sm btn-soft" data-action="att-add" data-w="' + w.id + '">Add by hand</button>' : "") + "</div>"; };
@@ -1204,7 +1295,8 @@
     let list;
     if (tab === "todo") list = todo.length ? '<div class="card alist">' + todo.map(attRow).join("") + "</div>" : '<div class="card">' + empty("Nothing to do. Everyone is confirmed.") + "</div>";
     else if (tab === "missing") list = missing.length ? '<div class="card alist">' + missing.map(missingRow).join("") + "</div>" : '<div class="card">' + empty("Everyone booked here clocked in.") + "</div>";
-    else list = recs.length ? byCrew(recs) : '<div class="card">' + empty(isSunday(d) ? "Sunday. Rest day." : "Nobody clocked in at this site on this day.") + "</div>";
+    else if (tab === "rejected") list = rejected.length ? '<div class="card alist">' + rejected.map(attRow).join("") + '</div><p class="small muted mt-12">Rejected days are never deleted. Restore one if it was a mistake. <a class="link-btn small" href="#/bin">All rejected days</a></p>' : '<div class="card">' + empty("Nothing rejected on this day.", '<br><a class="btn btn-soft btn-sm" href="#/bin">' + icon("bin") + "All rejected days</a>") + "</div>";
+    else list = live.length ? byCrew(live) : '<div class="card">' + empty(isSunday(d) ? "Sunday. Rest day." : "Nobody clocked in at this site on this day.") + "</div>";
 
     const help = can.approve() ? "To do: workers waiting for you to confirm, or where your time and the worker's differ by more than " + S.settings.matchMinutes + " minutes. Hours are worked out automatically, but you have the final say. Tap a worker to see the photos, change the hours or reject the day."
       : "Only the site manager can confirm, approve or change attendance. Tap a worker to see the photos.";
@@ -1217,12 +1309,12 @@
   // Worker screen words. Everything except English is a DRAFT: a native speaker must check it before real use.
   const LANGS = { en: "English", ms: "Bahasa Malaysia", bn: "বাংলা (Bengali)", ne: "नेपाली (Nepali)", id: "Bahasa Indonesia", my: "မြန်မာ (Burmese)" };
   const T = {
-    en: { today: "Today", notYet: "Not yet", hi: "Hi", clockIn: "Clock in", clockOut: "Clock out", inSince: "In since", doneToday: "Done for today", confirmed: "Site manager confirmed", waitingConfirm: "Waiting for site manager to confirm", tomorrow: "Tomorrow", restDay: "Rest day", noJob: "Not booked yet", myPay: "My pay this month", days: "days", ot: "OT", checked: "checked", waiting: "waiting", dayRate: "Day rate", otRate: "OT per hour", payDay: "Pay day", myDays: "My days", wrong: "Something wrong? Tell site manager", takePhoto: "Take a selfie", confirm: "Confirm", retake: "Retake", onSite: "You are at the site", notOnSite: "You are not at the site. Go to the site to clock in.", send: "Send", whichDay: "Which day?", whatsWrong: "What is wrong?", wrongTime: "Wrong time", missingDay: "Day missing", wrongOT: "Wrong OT", other: "Other", sent: "Sent to site manager", language: "Language", scanQR: "Scan the QR code at the site gate", scan: "Scan QR code", whoAreYou: "Who are you?", notYou: "Not you?", approved: "Checked", rejected: "Not paid", hours: "hours", note: "Tell us more (optional)", noDays: "No days yet this month." },
-    ms: { today: "Hari ini", notYet: "Belum", hi: "Hai", clockIn: "Masuk kerja", clockOut: "Keluar kerja", inSince: "Masuk sejak", doneToday: "Selesai hari ini", confirmed: "Disahkan oleh pengurus tapak", waitingConfirm: "Menunggu pengesahan pengurus tapak", tomorrow: "Esok", restDay: "Hari rehat", noJob: "Belum dijadualkan", myPay: "Gaji saya bulan ini", days: "hari", ot: "OT", checked: "disahkan", waiting: "menunggu", dayRate: "Kadar harian", otRate: "OT sejam", payDay: "Hari gaji", myDays: "Hari kerja saya", wrong: "Ada masalah? Beritahu pengurus tapak", takePhoto: "Ambil swafoto", confirm: "Sahkan", retake: "Ambil semula", onSite: "Anda berada di tapak", notOnSite: "Anda tiada di tapak. Pergi ke tapak untuk masuk kerja.", send: "Hantar", whichDay: "Hari apa?", whatsWrong: "Apa masalahnya?", wrongTime: "Masa salah", missingDay: "Hari tiada", wrongOT: "OT salah", other: "Lain-lain", sent: "Dihantar kepada pengurus tapak", language: "Bahasa", scanQR: "Imbas kod QR di pintu masuk tapak", scan: "Imbas kod QR", whoAreYou: "Siapa anda?", notYou: "Bukan anda?", approved: "Disahkan", rejected: "Tidak dibayar", hours: "jam", note: "Ceritakan lagi (pilihan)", noDays: "Belum ada hari kerja bulan ini." },
-    id: { today: "Hari ini", notYet: "Belum", hi: "Halo", clockIn: "Absen masuk", clockOut: "Absen pulang", inSince: "Masuk sejak", doneToday: "Selesai hari ini", confirmed: "Dikonfirmasi manajer lapangan", waitingConfirm: "Menunggu konfirmasi manajer lapangan", tomorrow: "Besok", restDay: "Hari libur", noJob: "Belum dijadwalkan", myPay: "Gaji saya bulan ini", days: "hari", ot: "lembur", checked: "dikonfirmasi", waiting: "menunggu", dayRate: "Upah harian", otRate: "Lembur per jam", payDay: "Hari gajian", myDays: "Hari kerja saya", wrong: "Ada yang salah? Beri tahu manajer lapangan", takePhoto: "Ambil swafoto", confirm: "Konfirmasi", retake: "Ulangi", onSite: "Anda berada di lokasi", notOnSite: "Anda tidak di lokasi. Pergi ke lokasi untuk absen.", send: "Kirim", whichDay: "Hari apa?", whatsWrong: "Apa yang salah?", wrongTime: "Jam salah", missingDay: "Hari hilang", wrongOT: "Lembur salah", other: "Lainnya", sent: "Terkirim ke manajer lapangan", language: "Bahasa", scanQR: "Pindai kode QR di gerbang lokasi", scan: "Pindai kode QR", whoAreYou: "Siapa Anda?", notYou: "Bukan Anda?", approved: "Dikonfirmasi", rejected: "Tidak dibayar", hours: "jam", note: "Ceritakan lebih lanjut (opsional)", noDays: "Belum ada hari kerja bulan ini." },
-    bn: { today: "আজ", notYet: "এখনও না", hi: "হ্যালো", clockIn: "কাজ শুরু", clockOut: "কাজ শেষ", inSince: "শুরু হয়েছে", doneToday: "আজকের কাজ শেষ", confirmed: "সাইট ম্যানেজার নিশ্চিত করেছেন", waitingConfirm: "সাইট ম্যানেজারের নিশ্চিতকরণের অপেক্ষায়", tomorrow: "আগামীকাল", restDay: "ছুটির দিন", noJob: "এখনও ঠিক হয়নি", myPay: "এই মাসে আমার বেতন", days: "দিন", ot: "ওভারটাইম", checked: "নিশ্চিত", waiting: "অপেক্ষায়", dayRate: "দৈনিক মজুরি", otRate: "প্রতি ঘণ্টা ওভারটাইম", payDay: "বেতনের দিন", myDays: "আমার কাজের দিন", wrong: "কিছু ভুল? সাইট ম্যানেজারকে জানান", takePhoto: "সেলফি তুলুন", confirm: "নিশ্চিত করুন", retake: "আবার তুলুন", onSite: "আপনি সাইটে আছেন", notOnSite: "আপনি সাইটে নেই। কাজ শুরু করতে সাইটে যান।", send: "পাঠান", whichDay: "কোন দিন?", whatsWrong: "কী ভুল?", wrongTime: "সময় ভুল", missingDay: "দিন বাদ পড়েছে", wrongOT: "ওভারটাইম ভুল", other: "অন্যান্য", sent: "সাইট ম্যানেজারকে পাঠানো হয়েছে", language: "ভাষা", scanQR: "সাইটের গেটে QR কোড স্ক্যান করুন", scan: "QR কোড স্ক্যান করুন", whoAreYou: "আপনি কে?", notYou: "আপনি নন?", approved: "নিশ্চিত", rejected: "বেতন হবে না", hours: "ঘণ্টা", note: "আরও বলুন (ঐচ্ছিক)", noDays: "এই মাসে এখনও কোনো দিন নেই।" },
-    ne: { today: "आज", notYet: "अझै छैन", hi: "नमस्ते", clockIn: "काम सुरु", clockOut: "काम सकियो", inSince: "सुरु भएको", doneToday: "आजको काम सकियो", confirmed: "साइट म्यानेजरले पुष्टि गर्नुभयो", waitingConfirm: "साइट म्यानेजरको पुष्टिको पर्खाइमा", tomorrow: "भोलि", restDay: "बिदाको दिन", noJob: "अझै तय भएको छैन", myPay: "यो महिनाको मेरो तलब", days: "दिन", ot: "ओभरटाइम", checked: "पुष्टि भयो", waiting: "पर्खाइमा", dayRate: "दैनिक ज्याला", otRate: "प्रति घण्टा ओभरटाइम", payDay: "तलब आउने दिन", myDays: "मेरा कामका दिन", wrong: "केही गलत छ? साइट म्यानेजरलाई भन्नुहोस्", takePhoto: "सेल्फी खिच्नुहोस्", confirm: "पुष्टि गर्नुहोस्", retake: "फेरि खिच्नुहोस्", onSite: "तपाईं साइटमा हुनुहुन्छ", notOnSite: "तपाईं साइटमा हुनुहुन्न। काम सुरु गर्न साइटमा जानुहोस्।", send: "पठाउनुहोस्", whichDay: "कुन दिन?", whatsWrong: "के गलत छ?", wrongTime: "समय गलत", missingDay: "दिन छुट्यो", wrongOT: "ओभरटाइम गलत", other: "अन्य", sent: "साइट म्यानेजरलाई पठाइयो", language: "भाषा", scanQR: "साइटको गेटमा QR कोड स्क्यान गर्नुहोस्", scan: "QR कोड स्क्यान गर्नुहोस्", whoAreYou: "तपाईं को हो?", notYou: "तपाईं होइन?", approved: "पुष्टि भयो", rejected: "तलब हुँदैन", hours: "घण्टा", note: "थप भन्नुहोस् (ऐच्छिक)", noDays: "यो महिना अझै कुनै दिन छैन।" },
-    my: { today: "ဒီနေ့", notYet: "မရှိသေး", hi: "မင်္ဂလာပါ", clockIn: "အလုပ်ဝင်", clockOut: "အလုပ်ဆင်း", inSince: "ဝင်ချိန်", doneToday: "ဒီနေ့ အလုပ်ပြီးပါပြီ", confirmed: "ဆိုက်မန်နေဂျာ အတည်ပြုပြီး", waitingConfirm: "ဆိုက်မန်နေဂျာ အတည်ပြုရန် စောင့်နေသည်", tomorrow: "မနက်ဖြန်", restDay: "အနားယူရက်", noJob: "မသတ်မှတ်ရသေး", myPay: "ဒီလ ကျွန်ုပ်၏ လစာ", days: "ရက်", ot: "အချိန်ပို", checked: "အတည်ပြုပြီး", waiting: "စောင့်ဆိုင်းဆဲ", dayRate: "နေ့စား လုပ်ခ", otRate: "တစ်နာရီ အချိန်ပိုခ", payDay: "လစာထုတ်ရက်", myDays: "ကျွန်ုပ်၏ အလုပ်ရက်များ", wrong: "မှားနေလား? ဆိုက်မန်နေဂျာကို ပြောပါ", takePhoto: "ဆယ်လ်ဖီ ရိုက်ပါ", confirm: "အတည်ပြုပါ", retake: "ပြန်ရိုက်ပါ", onSite: "သင် ဆိုက်တွင် ရှိနေသည်", notOnSite: "သင် ဆိုက်တွင် မရှိပါ။ အလုပ်ဝင်ရန် ဆိုက်သို့ သွားပါ။", send: "ပို့ပါ", whichDay: "ဘယ်နေ့လဲ?", whatsWrong: "ဘာမှားနေလဲ?", wrongTime: "အချိန် မှားသည်", missingDay: "ရက် ကျန်နေသည်", wrongOT: "အချိန်ပို မှားသည်", other: "အခြား", sent: "ဆိုက်မန်နေဂျာထံ ပို့ပြီးပါပြီ", language: "ဘာသာစကား", scanQR: "ဆိုက်ဂိတ်ရှိ QR ကုဒ်ကို စကင်ဖတ်ပါ", scan: "QR ကုဒ် စကင်ဖတ်ပါ", whoAreYou: "သင် ဘယ်သူလဲ?", notYou: "သင် မဟုတ်ဘူးလား?", approved: "အတည်ပြုပြီး", rejected: "လစာ မရ", hours: "နာရီ", note: "ထပ်ပြောပါ (မဖြစ်မနေမဟုတ်)", noDays: "ဒီလ အလုပ်ရက် မရှိသေးပါ။" }
+    en: { myHistory: "My history", myHistorySub: "Everything done to your days", today: "Today", notYet: "Not yet", hi: "Hi", clockIn: "Clock in", clockOut: "Clock out", inSince: "In since", doneToday: "Done for today", confirmed: "Site manager confirmed", waitingConfirm: "Waiting for site manager to confirm", tomorrow: "Tomorrow", restDay: "Rest day", noJob: "Not booked yet", myPay: "My pay this month", days: "days", ot: "OT", checked: "checked", waiting: "waiting", dayRate: "Day rate", otRate: "OT per hour", payDay: "Pay day", myDays: "My days", wrong: "Something wrong? Tell site manager", takePhoto: "Take a selfie", confirm: "Confirm", retake: "Retake", onSite: "You are at the site", notOnSite: "You are not at the site. Go to the site to clock in.", send: "Send", whichDay: "Which day?", whatsWrong: "What is wrong?", wrongTime: "Wrong time", missingDay: "Day missing", wrongOT: "Wrong OT", other: "Other", sent: "Sent to site manager", language: "Language", scanQR: "Scan the QR code at the site gate", scan: "Scan QR code", whoAreYou: "Who are you?", notYou: "Not you?", approved: "Checked", rejected: "Not paid", hours: "hours", note: "Tell us more (optional)", noDays: "No days yet this month." },
+    ms: { myHistory: "Sejarah saya", myHistorySub: "Semua perubahan pada hari kerja anda", today: "Hari ini", notYet: "Belum", hi: "Hai", clockIn: "Masuk kerja", clockOut: "Keluar kerja", inSince: "Masuk sejak", doneToday: "Selesai hari ini", confirmed: "Disahkan oleh pengurus tapak", waitingConfirm: "Menunggu pengesahan pengurus tapak", tomorrow: "Esok", restDay: "Hari rehat", noJob: "Belum dijadualkan", myPay: "Gaji saya bulan ini", days: "hari", ot: "OT", checked: "disahkan", waiting: "menunggu", dayRate: "Kadar harian", otRate: "OT sejam", payDay: "Hari gaji", myDays: "Hari kerja saya", wrong: "Ada masalah? Beritahu pengurus tapak", takePhoto: "Ambil swafoto", confirm: "Sahkan", retake: "Ambil semula", onSite: "Anda berada di tapak", notOnSite: "Anda tiada di tapak. Pergi ke tapak untuk masuk kerja.", send: "Hantar", whichDay: "Hari apa?", whatsWrong: "Apa masalahnya?", wrongTime: "Masa salah", missingDay: "Hari tiada", wrongOT: "OT salah", other: "Lain-lain", sent: "Dihantar kepada pengurus tapak", language: "Bahasa", scanQR: "Imbas kod QR di pintu masuk tapak", scan: "Imbas kod QR", whoAreYou: "Siapa anda?", notYou: "Bukan anda?", approved: "Disahkan", rejected: "Tidak dibayar", hours: "jam", note: "Ceritakan lagi (pilihan)", noDays: "Belum ada hari kerja bulan ini." },
+    id: { myHistory: "Riwayat saya", myHistorySub: "Semua perubahan pada hari kerja Anda", today: "Hari ini", notYet: "Belum", hi: "Halo", clockIn: "Absen masuk", clockOut: "Absen pulang", inSince: "Masuk sejak", doneToday: "Selesai hari ini", confirmed: "Dikonfirmasi manajer lapangan", waitingConfirm: "Menunggu konfirmasi manajer lapangan", tomorrow: "Besok", restDay: "Hari libur", noJob: "Belum dijadwalkan", myPay: "Gaji saya bulan ini", days: "hari", ot: "lembur", checked: "dikonfirmasi", waiting: "menunggu", dayRate: "Upah harian", otRate: "Lembur per jam", payDay: "Hari gajian", myDays: "Hari kerja saya", wrong: "Ada yang salah? Beri tahu manajer lapangan", takePhoto: "Ambil swafoto", confirm: "Konfirmasi", retake: "Ulangi", onSite: "Anda berada di lokasi", notOnSite: "Anda tidak di lokasi. Pergi ke lokasi untuk absen.", send: "Kirim", whichDay: "Hari apa?", whatsWrong: "Apa yang salah?", wrongTime: "Jam salah", missingDay: "Hari hilang", wrongOT: "Lembur salah", other: "Lainnya", sent: "Terkirim ke manajer lapangan", language: "Bahasa", scanQR: "Pindai kode QR di gerbang lokasi", scan: "Pindai kode QR", whoAreYou: "Siapa Anda?", notYou: "Bukan Anda?", approved: "Dikonfirmasi", rejected: "Tidak dibayar", hours: "jam", note: "Ceritakan lebih lanjut (opsional)", noDays: "Belum ada hari kerja bulan ini." },
+    bn: { myHistory: "আমার ইতিহাস", myHistorySub: "আপনার কাজের দিনে করা সব পরিবর্তন", today: "আজ", notYet: "এখনও না", hi: "হ্যালো", clockIn: "কাজ শুরু", clockOut: "কাজ শেষ", inSince: "শুরু হয়েছে", doneToday: "আজকের কাজ শেষ", confirmed: "সাইট ম্যানেজার নিশ্চিত করেছেন", waitingConfirm: "সাইট ম্যানেজারের নিশ্চিতকরণের অপেক্ষায়", tomorrow: "আগামীকাল", restDay: "ছুটির দিন", noJob: "এখনও ঠিক হয়নি", myPay: "এই মাসে আমার বেতন", days: "দিন", ot: "ওভারটাইম", checked: "নিশ্চিত", waiting: "অপেক্ষায়", dayRate: "দৈনিক মজুরি", otRate: "প্রতি ঘণ্টা ওভারটাইম", payDay: "বেতনের দিন", myDays: "আমার কাজের দিন", wrong: "কিছু ভুল? সাইট ম্যানেজারকে জানান", takePhoto: "সেলফি তুলুন", confirm: "নিশ্চিত করুন", retake: "আবার তুলুন", onSite: "আপনি সাইটে আছেন", notOnSite: "আপনি সাইটে নেই। কাজ শুরু করতে সাইটে যান।", send: "পাঠান", whichDay: "কোন দিন?", whatsWrong: "কী ভুল?", wrongTime: "সময় ভুল", missingDay: "দিন বাদ পড়েছে", wrongOT: "ওভারটাইম ভুল", other: "অন্যান্য", sent: "সাইট ম্যানেজারকে পাঠানো হয়েছে", language: "ভাষা", scanQR: "সাইটের গেটে QR কোড স্ক্যান করুন", scan: "QR কোড স্ক্যান করুন", whoAreYou: "আপনি কে?", notYou: "আপনি নন?", approved: "নিশ্চিত", rejected: "বেতন হবে না", hours: "ঘণ্টা", note: "আরও বলুন (ঐচ্ছিক)", noDays: "এই মাসে এখনও কোনো দিন নেই।" },
+    ne: { myHistory: "मेरो इतिहास", myHistorySub: "तपाईंका कामका दिनमा गरिएका सबै परिवर्तन", today: "आज", notYet: "अझै छैन", hi: "नमस्ते", clockIn: "काम सुरु", clockOut: "काम सकियो", inSince: "सुरु भएको", doneToday: "आजको काम सकियो", confirmed: "साइट म्यानेजरले पुष्टि गर्नुभयो", waitingConfirm: "साइट म्यानेजरको पुष्टिको पर्खाइमा", tomorrow: "भोलि", restDay: "बिदाको दिन", noJob: "अझै तय भएको छैन", myPay: "यो महिनाको मेरो तलब", days: "दिन", ot: "ओभरटाइम", checked: "पुष्टि भयो", waiting: "पर्खाइमा", dayRate: "दैनिक ज्याला", otRate: "प्रति घण्टा ओभरटाइम", payDay: "तलब आउने दिन", myDays: "मेरा कामका दिन", wrong: "केही गलत छ? साइट म्यानेजरलाई भन्नुहोस्", takePhoto: "सेल्फी खिच्नुहोस्", confirm: "पुष्टि गर्नुहोस्", retake: "फेरि खिच्नुहोस्", onSite: "तपाईं साइटमा हुनुहुन्छ", notOnSite: "तपाईं साइटमा हुनुहुन्न। काम सुरु गर्न साइटमा जानुहोस्।", send: "पठाउनुहोस्", whichDay: "कुन दिन?", whatsWrong: "के गलत छ?", wrongTime: "समय गलत", missingDay: "दिन छुट्यो", wrongOT: "ओभरटाइम गलत", other: "अन्य", sent: "साइट म्यानेजरलाई पठाइयो", language: "भाषा", scanQR: "साइटको गेटमा QR कोड स्क्यान गर्नुहोस्", scan: "QR कोड स्क्यान गर्नुहोस्", whoAreYou: "तपाईं को हो?", notYou: "तपाईं होइन?", approved: "पुष्टि भयो", rejected: "तलब हुँदैन", hours: "घण्टा", note: "थप भन्नुहोस् (ऐच्छिक)", noDays: "यो महिना अझै कुनै दिन छैन।" },
+    my: { myHistory: "ကျွန်ုပ်၏ မှတ်တမ်း", myHistorySub: "သင့်အလုပ်ရက်များအတွက် ပြောင်းလဲမှုအားလုံး", today: "ဒီနေ့", notYet: "မရှိသေး", hi: "မင်္ဂလာပါ", clockIn: "အလုပ်ဝင်", clockOut: "အလုပ်ဆင်း", inSince: "ဝင်ချိန်", doneToday: "ဒီနေ့ အလုပ်ပြီးပါပြီ", confirmed: "ဆိုက်မန်နေဂျာ အတည်ပြုပြီး", waitingConfirm: "ဆိုက်မန်နေဂျာ အတည်ပြုရန် စောင့်နေသည်", tomorrow: "မနက်ဖြန်", restDay: "အနားယူရက်", noJob: "မသတ်မှတ်ရသေး", myPay: "ဒီလ ကျွန်ုပ်၏ လစာ", days: "ရက်", ot: "အချိန်ပို", checked: "အတည်ပြုပြီး", waiting: "စောင့်ဆိုင်းဆဲ", dayRate: "နေ့စား လုပ်ခ", otRate: "တစ်နာရီ အချိန်ပိုခ", payDay: "လစာထုတ်ရက်", myDays: "ကျွန်ုပ်၏ အလုပ်ရက်များ", wrong: "မှားနေလား? ဆိုက်မန်နေဂျာကို ပြောပါ", takePhoto: "ဆယ်လ်ဖီ ရိုက်ပါ", confirm: "အတည်ပြုပါ", retake: "ပြန်ရိုက်ပါ", onSite: "သင် ဆိုက်တွင် ရှိနေသည်", notOnSite: "သင် ဆိုက်တွင် မရှိပါ။ အလုပ်ဝင်ရန် ဆိုက်သို့ သွားပါ။", send: "ပို့ပါ", whichDay: "ဘယ်နေ့လဲ?", whatsWrong: "ဘာမှားနေလဲ?", wrongTime: "အချိန် မှားသည်", missingDay: "ရက် ကျန်နေသည်", wrongOT: "အချိန်ပို မှားသည်", other: "အခြား", sent: "ဆိုက်မန်နေဂျာထံ ပို့ပြီးပါပြီ", language: "ဘာသာစကား", scanQR: "ဆိုက်ဂိတ်ရှိ QR ကုဒ်ကို စကင်ဖတ်ပါ", scan: "QR ကုဒ် စကင်ဖတ်ပါ", whoAreYou: "သင် ဘယ်သူလဲ?", notYou: "သင် မဟုတ်ဘူးလား?", approved: "အတည်ပြုပြီး", rejected: "လစာ မရ", hours: "နာရီ", note: "ထပ်ပြောပါ (မဖြစ်မနေမဟုတ်)", noDays: "ဒီလ အလုပ်ရက် မရှိသေးပါ။" }
   };
   const W = () => S.people.worker;
   const me = () => worker(W().workerId);
@@ -1279,7 +1371,7 @@
     const mk = monthKey(t), m = workerMonth(w, mk);
     const hourly = w.dayRate / S.settings.normalHours * S.settings.otRate;
     const dayRows = m.recs.length ? '<div class="list">' + m.recs.map((x) => { const h = calcHours(x); const f = h.final; return '<div class="li"><div class="li-main"><div class="li-title">' + fmtDay(x.date) + '</div><div class="li-sub">' + (f.half ? "½ " : "") + hrs(f.normal) + (f.ot ? " + " + hrs(f.ot) + " " + tr("ot") : "") + "</div></div>" +
-      (x.status === "approved" ? chip(tr("approved"), "good") : x.status === "rejected" ? chip(tr("rejected"), "bad") : chip(tr("waiting"), "warn")) + '<span class="li-amt num">' + (x.status === "rejected" ? "–" : RM(Math.round(payFor(x)))) + "</span></div>"; }).join("") + "</div>" : empty(tr("noDays"));
+      (x.status === "approved" ? chip(tr("approved"), "good") : x.status === "rejected" ? chip(tr("rejected"), "bad") + (x.rejectReason ? '<span class="tiny muted" style="display:block">“' + esc(x.rejectReason) + "”</span>" : "") : chip(tr("waiting"), "warn")) + '<span class="li-amt num">' + (x.status === "rejected" ? "–" : RM(Math.round(payFor(x)))) + "</span></div>"; }).join("") + "</div>" : empty(tr("noDays"));
     return '<div class="w-wrap">' +
       '<div class="w-head"><div><h1 class="greet">' + tr("hi") + " " + esc(w.name.replace(/^(Md\.|Mohd)\s+/, "").split(" ")[0]) + '</h1><p class="page-sub">' + esc(site.name) + ", " + fmtDay(t) + ' <button class="link-btn small" data-action="w-notme">' + tr("notYou") + "</button></p></div>" + langPick() + "</div>" +
       big + confirmLine +
@@ -1288,6 +1380,7 @@
       '<div class="w-pay-grid"><div><b class="num">' + m.days + "</b><span>" + tr("days") + '</span></div><div><b class="num">' + hrs(m.ot) + "</b><span>" + tr("ot") + '</span></div><div><b class="num">' + RMshort(Math.round(m.checked)) + "</b><span>" + tr("checked") + '</span></div><div><b class="num">' + RMshort(Math.round(m.waiting)) + "</b><span>" + tr("waiting") + "</span></div></div>" +
       '<div class="w-rates small"><span>' + tr("dayRate") + " <b>" + RM(w.dayRate) + "</b></span><span>" + tr("otRate") + " <b>" + RM(Math.round(hourly * 100) / 100) + "</b></span><span>" + tr("payDay") + " <b>" + fmtDay(payDayFor(mk)) + "</b></span></div></div>" +
       fold("w-days", tr("myDays"), MON_LONG[+mk.slice(5) - 1], "", dayRows) +
+      fold("w-history", tr("myHistory"), tr("myHistorySub"), "", (() => { const l = S.audit.filter((a) => a.workerId === w.id).slice(0, 40); return l.length ? '<div class="au-list">' + l.map((a) => '<div class="au-day muted tiny">' + fmtDay(a.date) + "</div>" + auditRow(a, true)).join("") + "</div>" : empty("–"); })()) +
       '<button class="btn btn-block btn-big mt-16" data-action="w-report">' + icon("flag") + tr("wrong") + "</button>" +
       "</div>";
   }
@@ -1352,6 +1445,14 @@
   const errBox = () => (ui.sheet.err ? '<div class="form-error">' + ui.sheet.err + "</div>" : "");
 
   const SHEETS = {
+    reject(s) {
+      const r = S.attendance.find((a) => a.id === s.recId), w = worker(r.workerId);
+      return sheetHead("Reject this day?") +
+        '<p class="muted">' + esc(w.name) + ", " + fmtDayLong(r.date) + ". The day will not be paid. It goes to <b>Rejected</b>, where you can restore it. The worker sees the reason.</p>" +
+        '<div class="field"><span>Why</span>' + choiceRow("reason", ["Not on site", "Photo is not this worker", "Clocked in twice", "Left early without asking", "Other"], val("reason", "")) + "</div>" +
+        '<label class="field"><span>Details <em>(optional)</em></span><input class="input" data-f="note" value="' + esc(val("note", "")) + '"></label>' +
+        errBox() + '<div class="sheet-foot"><button class="btn btn-soft btn-big" data-action="close-sheet">Cancel</button><button class="btn btn-danger btn-big" data-action="reject-save">' + icon("x") + "Reject day</button></div>";
+    },
     help(s) { return sheetHead("How this page works") + '<p class="help-text">' + esc(s.text) + "</p>"; },
     notes() {
       const list = myNotes().slice(0, 40);
@@ -1362,6 +1463,9 @@
         if (n.type === "selfie-out") return "<b>" + name + "</b> clocked out with a selfie at " + n.time + (site ? ", " + site : "");
         if (n.type === "report") return "<b>" + name + "</b> reported: " + esc(n.text || "") + (n.forDate ? " (" + fmtDay(n.forDate) + ")" : "");
         if (n.type === "confirmed") return W_ ? "<b>" + tr("confirmed") + "</b> " + n.time : "<b>" + name + "</b> confirmed at " + n.time;
+        if (n.type === "rejected") return "<b>" + tr("rejected") + "</b>: " + fmtDay(n.forDate) + ". “" + esc(n.text || "") + "”";
+        if (n.type === "restored") return "<b>" + fmtDay(n.forDate) + "</b>: " + (W_ ? tr("waiting") : "restored");
+        if (n.type === "changed") return "<b>" + fmtDay(n.forDate) + "</b>: " + esc(n.text || "");
         return esc(n.text || "");
       };
       return sheetHead(W_ ? '<span style="display:inline-flex;gap:8px;align-items:center">' + icon("bell", ' style="width:22px;height:22px"') + "</span>" : "Notifications") +
@@ -1591,15 +1695,17 @@
      7. Actions
      ====================================================================== */
   let toastTimer = 0;
-  function toast(msg, ic) {
+  function toast(msg, ic, undo) {
     const t = $("#toast");
-    t.innerHTML = icon(ic || "check") + "<span>" + msg + "</span>";
+    ui.undo = undo || null;
+    t.innerHTML = icon(ic || "check") + "<span>" + msg + "</span>" + (undo ? '<button class="toast-undo" data-action="undo">' + icon("undo") + "Undo</button>" : "");
     t.classList.add("show");
+    t.classList.toggle("has-undo", !!undo);
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => t.classList.remove("show"), 3200);
+    toastTimer = setTimeout(() => { t.classList.remove("show"); t.classList.remove("has-undo"); ui.undo = null; }, undo ? 8000 : 3200);
   }
   function fail(msg) { ui.sheet.err = msg; renderSheet(); }
-  function commit(msg) { save(); closeSheet(); render(); if (msg) toast(msg); }
+  function commit(msg, undo) { save(); closeSheet(); render(); if (msg) toast(msg, null, undo); }
 
   function askConfirm(title, text, yes, danger, onYes) { openSheet({ type: "confirm", title, text, yes, danger, onYes }); }
 
@@ -1663,18 +1769,19 @@
       takePhoto("user").then((p) => { if (p) { s.photo = p; s.time = nowHM(); renderSheet(); } });
     },
     async "clock-save"() {
-      const s = ui.sheet, t = today(), w = worker(s.workerId);
+      const s = ui.sheet, t = today(), w = worker(s.workerId), snap = snapshot();
       const ref = await storePhoto(s.photo);
+      let rid = null;
       if (s.action === "in") {
-        S.attendance.push({ id: uid("at"), workerId: w.id, projectId: s.siteId, date: t, in: s.time, out: null, inPhoto: ref, outPhoto: null, status: "waiting", adjust: null, note: "" });
+        rid = uid("at");
+        S.attendance.push({ id: rid, workerId: w.id, projectId: s.siteId, date: t, in: s.time, out: null, inPhoto: ref, outPhoto: null, status: "waiting", adjust: null, note: "" });
       } else {
         const r = S.attendance.find((a) => a.workerId === w.id && a.date === t && a.projectId === s.siteId && a.in && !a.out);
-        if (r) { r.out = s.time; r.outPhoto = ref; }
+        if (r) { r.out = s.time; r.outPhoto = ref; rid = r.id; }
       }
-      save();
-      toast(esc(w.name) + (s.action === "in" ? " clocked in at " : " clocked out at ") + s.time);
+      const e = log(s.action === "in" ? "photo-in" : "photo-out", { workerId: w.id, recId: rid, projectId: s.siteId, forDate: t, value: s.time });
       s.step = "list"; s.q = ""; s.photo = null;
-      renderSheet(); render();
+      done(esc(w.name) + (s.action === "in" ? " clocked in at " : " clocked out at ") + s.time, snap, [e]);
     },
 
     "open-notes"() { ui.menu = false; openSheet({ type: "notes" }); setTimeout(() => { myNotes().forEach((n) => { n.read = true; }); save(); renderTop(); }, 400); },
@@ -1689,27 +1796,68 @@
       if (location.hash === "#/attendance") render(); else location.hash = "#/attendance";
     },
     help(el) { openSheet({ type: "help", text: el.dataset.t }); },
+    "au-filter"(el) { ui.auFilter = el.dataset.f; render(); },
+    "au-csv"() {
+      const q = (v) => '"' + String(v == null ? "" : v).replace(/"/g, '""') + '"';
+      const rows = [["Date", "Time", "Who", "Role", "Action", "Worker", "For day", "Details", "Reason"]].concat(S.audit.map((a) => [fmtDate(a.date), a.time, a.byName, ROLE_SHORT[a.by], a.action, (worker(a.workerId) || {}).name || "", a.forDate ? fmtDate(a.forDate) : "", a.value || "", a.reason || ""]));
+      const blob = new Blob(["\ufeff" + rows.map((r) => r.map(q).join(",")).join("\r\n")], { type: "text/csv;charset=utf-8" });
+      const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = S.company.name.replace(/\W+/g, "-") + "-history.csv";
+      document.body.appendChild(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(link.href), 2000);
+      toast("Downloaded " + S.audit.length + " history entries.", "download");
+    },
     "att-filter"(el) { ui.attFilter = el.dataset.f; ui.attFocus = null; render(); },
     "att-review"(el) { ui.attSite = el.dataset.site; ui.attDate = today(); ui.attFilter = "todo"; ui.attPicked = true; location.hash = "#/attendance"; },
     "clock-confirm"(el) {
       const r = S.attendance.find((a) => a.id === el.dataset.id); if (!r) return;
-      const w = worker(r.workerId), tm = nowHM();
+      const w = worker(r.workerId), tm = nowHM(), snap = snapshot();
       // confirming = agreeing with the worker's selfie time; we also keep when it was confirmed
       if (el.dataset.act === "in") { r.in = (r.self && r.self.in) || tm; r.confirmedIn = tm; } else { r.out = (r.self && r.self.out) || tm; r.confirmedOut = tm; }
       notify({ type: "confirmed", to: "worker", workerId: r.workerId, projectId: r.projectId });
-      save(); toast(esc(w.name) + (el.dataset.act === "in" ? " confirmed in at " : " confirmed out at ") + tm);
-      if (ui.sheet && ui.sheet.type === "clock") renderSheet();
-      render();
+      const e = log(el.dataset.act === "in" ? "confirm-in" : "confirm-out", { workerId: r.workerId, recId: r.id, projectId: r.projectId, forDate: r.date, value: el.dataset.act === "in" ? r.in : r.out });
+      done(esc(w.name) + " confirmed", snap, [e]);
     },
     "confirm-all"(el) {
-      const tm = nowHM();
+      const tm = nowHM(), snap = snapshot(), entries = [];
       const list = S.attendance.filter((a) => a.projectId === el.dataset.site && a.date === today() && a.self && ((a.self.in && !a.in) || (a.self.out && a.in && !a.out)));
-      list.forEach((a) => { if (!a.in) { a.in = a.self.in || tm; a.confirmedIn = tm; } else { a.out = a.self.out || tm; a.confirmedOut = tm; } notify({ type: "confirmed", to: "worker", workerId: a.workerId, projectId: a.projectId }); });
-      save(); toast("Confirmed " + plural(list.length, "worker") + ".");
-      if (ui.sheet && ui.sheet.type === "clock") renderSheet();
-      render();
+      list.forEach((a) => {
+        const isIn = !a.in;
+        if (isIn) { a.in = a.self.in || tm; a.confirmedIn = tm; } else { a.out = a.self.out || tm; a.confirmedOut = tm; }
+        notify({ type: "confirmed", to: "worker", workerId: a.workerId, projectId: a.projectId });
+        entries.push(log(isIn ? "confirm-in" : "confirm-out", { workerId: a.workerId, recId: a.id, projectId: a.projectId, forDate: a.date, value: isIn ? a.in : a.out }));
+      });
+      done("Confirmed " + plural(list.length, "worker") + ".", snap, entries);
     },
-    "dispute-done"(el) { const d = S.disputes.find((x) => x.id === el.dataset.id); if (d) { d.status = "sorted"; save(); render(); toast("Marked as sorted."); } },
+    "dispute-done"(el) {
+      const d = S.disputes.find((x) => x.id === el.dataset.id); if (!d) return;
+      const snap = snapshot(); d.status = "sorted";
+      done("Marked as sorted.", snap, [log("sorted", { workerId: d.workerId, projectId: d.projectId, forDate: d.date })]);
+    },
+    undo() {
+      const u = ui.undo; if (!u) return;
+      const o = JSON.parse(u.snap);
+      S.attendance = o.attendance; S.disputes = o.disputes; S.notifications = o.notifications;
+      log("undo", { value: u.label });
+      ui.undo = null; save(); render();
+      if (ui.sheet && ui.sheet.type === "clock") renderSheet();
+      toast("Undone. It is still recorded in History.", "undo");
+    },
+    "att-restore"(el) {
+      const r = S.attendance.find((a) => a.id === el.dataset.id); if (!r) return;
+      const snap = snapshot(); r.status = "waiting"; r.restoredAt = new Date().toISOString();
+      notify({ type: "restored", to: "worker", workerId: r.workerId, projectId: r.projectId, forDate: r.date });
+      done(esc(worker(r.workerId).name) + "'s day restored. It is waiting for a check again.", snap, [log("restore", { workerId: r.workerId, recId: r.id, projectId: r.projectId, forDate: r.date })]);
+    },
+    "reject-save"() {
+      const f = F(), r = S.attendance.find((a) => a.id === ui.sheet.recId); if (!r) return;
+      if (!f.reason) return fail("Pick a reason. The worker will see it.");
+      const reason = f.reason + ((f.note || "").trim() ? ", " + f.note.trim() : "");
+      const snap = snapshot();
+      r.status = "rejected"; r.rejectReason = reason; r.rejectedAt = new Date().toISOString();
+      notify({ type: "rejected", to: "worker", workerId: r.workerId, projectId: r.projectId, forDate: r.date, text: reason });
+      const e = log("reject", { workerId: r.workerId, recId: r.id, projectId: r.projectId, forDate: r.date, reason });
+      closeSheet();
+      done(esc(worker(r.workerId).name) + "'s day moved to Rejected. Not paid unless restored.", snap, [e], "x");
+    },
     "att-open-day"(el) { closeSheet(); ui.attSite = el.dataset.site; ui.attDate = el.dataset.d; ui.attPicked = true; if (location.hash === "#/attendance") render(); else location.hash = "#/attendance"; },
 
     /* construction worker */
@@ -1734,6 +1882,7 @@
       if (s.act === "in") { r.self.in = s.time; r.self.inPhoto = ref; r.self.inLoc = "on site"; }
       else { r.self.out = s.time; r.self.outPhoto = ref; r.self.outLoc = "on site"; }
       notify({ type: s.act === "in" ? "selfie-in" : "selfie-out", to: "site", workerId: w.id, projectId: r.projectId, photo: ref, time: s.time });
+      log(s.act === "in" ? "self-in" : "self-out", { workerId: w.id, recId: r.id, projectId: r.projectId, forDate: t, value: s.time });
       save(); closeSheet(); render(); toast((s.act === "in" ? tr("clockIn") : tr("clockOut")) + " " + s.time + ". " + tr("waitingConfirm") + ".");
       window.scrollTo(0, 0);
     },
@@ -1744,6 +1893,7 @@
       const date = f.date || today();
       const rec = S.attendance.find((a) => a.workerId === w.id && a.date === date);
       S.disputes.push({ id: uid("ds"), workerId: w.id, date, projectId: rec ? rec.projectId : W().siteId, reason: T.en[f.reason], note: (f.note || "").trim(), status: "open", at: new Date().toISOString() });
+      log("report", { workerId: w.id, projectId: rec ? rec.projectId : W().siteId, forDate: date, value: T.en[f.reason] + ((f.note || "").trim() ? ", “" + f.note.trim() + "”" : "") });
       notify({ type: "report", to: "site", workerId: w.id, projectId: rec ? rec.projectId : W().siteId, text: T.en[f.reason] + ((f.note || "").trim() ? ", “" + f.note.trim() + "”" : ""), forDate: date });
       commit(tr("sent"));
     },
@@ -1922,18 +2072,25 @@
     "att-for"(el) { ui.attSite = el.dataset.id; ui.attDate = pickAttDate(el.dataset.id); ui.attPicked = true; },
     "att-goto"(el) { ui.attDate = el.dataset.d; ui.attFilter = null; ui.attFocus = null; render(); },
     "att-day"(el) { const d = addDays(ui.attDate, +el.dataset.step); if (d <= today()) { ui.attDate = d; ui.attFilter = null; ui.attFocus = null; render(); } },
-    "att-ok"(el) { const r = S.attendance.find((a) => a.id === el.dataset.id); r.status = "approved"; save(); render(); toast("Approved."); },
-    "att-no"(el) { const r = S.attendance.find((a) => a.id === el.dataset.id); r.status = "rejected"; save(); render(); toast("Rejected. This day will not be paid.", "x"); },
+    "att-ok"(el) {
+      const r = S.attendance.find((a) => a.id === el.dataset.id); if (!r) return;
+      const snap = snapshot(); r.status = "approved";
+      done("Approved " + esc(worker(r.workerId).name) + ".", snap, [log("approve", { workerId: r.workerId, recId: r.id, projectId: r.projectId, forDate: r.date, value: hoursText(calcHours(r)) })]);
+    },
+    "att-no"(el) { openSheet({ type: "reject", recId: el.dataset.id }); },
     "att-all"() {
-      const list = S.attendance.filter((a) => a.projectId === ui.attSite && a.date === ui.attDate && a.status === "waiting" && isDone(a) && !matchOf(a).flag);
-      list.forEach((a) => { a.status = "approved"; });
-      save(); render(); toast("Approved " + plural(list.length, "record") + ". Anything under “To do” still needs a look.");
+      const snap = snapshot();
+      const list = S.attendance.filter((a) => a.projectId === ui.attSite && a.date === ui.attDate && a.status === "waiting" && isDone(a) && !matchOf(a).flag && !needsConfirm(a));
+      const entries = list.map((a) => { a.status = "approved"; return log("approve", { workerId: a.workerId, recId: a.id, projectId: a.projectId, forDate: a.date, value: hoursText(calcHours(a)) }); });
+      done("Approved " + plural(list.length, "record") + ".", snap, entries);
     },
     "att-edit"(el) { openSheet({ type: "attEdit", recId: el.dataset.id }); },
     "att-add"(el) { openSheet({ type: "attEdit", workerId: el.dataset.w }); },
     "att-auto"() {
       const r = S.attendance.find((a) => a.id === ui.sheet.recId);
-      r.adjust = null; commit("Back to automatic hours.");
+      const snap = snapshot(); r.adjust = null;
+      const e = log("auto", { workerId: r.workerId, recId: r.id, projectId: r.projectId, forDate: r.date });
+      closeSheet(); done("Back to automatic hours.", snap, [e]);
     },
     "att-edit-save"() {
       const s = ui.sheet, f = F();
@@ -1949,6 +2106,8 @@
       const changedTimes = !r || inT !== e0.in || outT !== e0.out;
       const changedHours = normal !== auto.normal || ot !== auto.ot || half !== auto.half;
       if ((changedTimes || changedHours) && !reason) return fail("Write a short reason for the change.");
+      const snap = snapshot(), isNew = !r;
+      const before = r ? calcHours(r) : null;
       if (!r) {
         r = { id: uid("at"), workerId: s.workerId, projectId: ui.attSite, date: ui.attDate, in: inT, out: outT, inPhoto: null, outPhoto: null, status: "approved", adjust: null, note: "Added by hand: " + reason };
         S.attendance.push(r);
@@ -1956,7 +2115,19 @@
       r.in = inT; r.out = outT; r.status = "approved";
       r.adjust = changedHours || changedTimes ? { normal, ot, half, by: "site", reason } : r.adjust;
       if (r.adjust && !changedHours && !changedTimes && reason) r.adjust.reason = reason;
-      commit("Saved and approved: " + esc(worker(r.workerId).name) + ", " + hoursText(calcHours(r)) + ".");
+      // describe exactly what changed, for the history
+      const after = calcHours(r), parts = [];
+      if (!isNew) {
+        if (inT !== e0.in) parts.push("in " + (e0.in || "–") + " → " + inT);
+        if (outT !== e0.out) parts.push("out " + (e0.out || "–") + " → " + outT);
+        if (before && !before.open && before.final.normal !== after.final.normal) parts.push("normal " + hrs(before.final.normal) + " → " + hrs(after.final.normal));
+        if (before && !before.open && before.final.ot !== after.final.ot) parts.push("OT " + hrs(before.final.ot) + " → " + hrs(after.final.ot));
+        if (before && !before.open && before.final.half !== after.final.half) parts.push(after.final.half ? "made a half day" : "made a full day");
+      }
+      const e = log(isNew ? "add" : "change", { workerId: r.workerId, recId: r.id, projectId: r.projectId, forDate: r.date, value: isNew ? inT + "–" + outT + ", " + hoursText(after) : (parts.join(", ") || "approved, no changes"), reason });
+      notify({ type: "changed", to: "worker", workerId: r.workerId, projectId: r.projectId, forDate: r.date, text: e.value + (reason ? " (" + reason + ")" : "") });
+      closeSheet();
+      done("Saved and approved: " + esc(worker(r.workerId).name) + ", " + hoursText(after) + ".", snap, [e]);
     }
   };
 
@@ -1993,6 +2164,10 @@
       const pos = el.selectionStart;
       render();
       const n = $('[data-input="stockQ"]'); n.focus(); try { n.setSelectionRange(pos, pos); } catch (x) { /* search inputs */ }
+    }
+    if (el.dataset.input === "auQ") {
+      ui.auQ = el.value; render();
+      const n = $('[data-input="auQ"]'); n.focus(); try { n.setSelectionRange(el.value.length, el.value.length); } catch (x) { /* ok */ }
     }
     if (el.dataset.input === "wq") {
       ui.wq = el.value; render();

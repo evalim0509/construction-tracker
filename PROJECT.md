@@ -183,7 +183,7 @@ one are clocked in by the site manager with a photo, as before.
 ## 7. How it works (technical)
 
 - **No build step.** `index.html` loads `styles.css`, `three.min.js` (3D library, MIT, bundled locally), `factory3d.js`, `sample-data.js` and `app.js`.
-- **Updates reach phones straight away:** `index.html` links every file with a version number (`app.js?v=0.4.3`). Bump it on each release so browsers don't keep showing an old cached copy (GitHub Pages lets browsers cache files for 10 minutes).
+- **Updates reach phones straight away:** `index.html` links every file with a version number (`app.js?v=0.5.0`). Bump it on each release so browsers don't keep showing an old cached copy (GitHub Pages lets browsers cache files for 10 minutes).
 - **Data:** everything except photos is one JSON object in `localStorage` (`sitebook-data-v1`). Photos are compressed to ~720px JPEG and kept in **IndexedDB** (`sitebook-photos`).
 - **Screens** are functions returning HTML; clicks are handled in one place through `data-action` attributes.
 - **3D buildings** (`factory3d.js`): each project gets its own randomly generated factory (sawtooth roof, silos) or warehouse (gable roof, loading docks), seeded by the project id. The model shows progress: steel frame → walls going up (teal) → finished, with a tower crane until 92%. One shared WebGL view plus one for still thumbnails. Falls back to a line drawing if WebGL is not available.
@@ -200,7 +200,8 @@ attendance   id, workerId, projectId, date,
              self{in, out, inPhoto, outPhoto, inLoc} (worker's own phone; second count)
              status(waiting|approved|rejected), adjust{normal,ot,half,reason}
 disputes     id, workerId, date, projectId, reason, note, status(open|sorted)
-notifications id, type(selfie-in|selfie-out|report|confirmed), to(site|worker), workerId, projectId, photo, date, time, read
+notifications id, type(selfie-in|selfie-out|report|confirmed|rejected|restored|changed), to(site|worker), workerId, projectId, photo, date, time, read
+audit        id, date, time, by(site|worker|boss), byName, action, workerId, recId, projectId, forDate, value, reason   (append-only)
 materials    id, name, unit, qty (in yard), min, cat (category; guessed from the name if missing)
 needs        id, projectId, materialId, qty, by, status(to buy|ordered|arrived)
 moves        id, date, materialId, qty, kind(in|out|direct), projectId
@@ -238,10 +239,25 @@ Site manager only worker has no phone                             → neutral, n
 6. **Workers clocking in from home.** The prototype only pretends to check location. The real version must check the phone's GPS against the site and save the distance with each clock-in. GPS can be faked on rooted phones, which is why the site manager's tap still matters.
 7. **Translations are drafts.** Bengali, Nepali, Indonesian, Burmese and Bahasa Malaysia text must be checked by a native speaker before workers use it. Wrong wording about pay causes disputes.
 8. **QR sign-in is weak identity.** Anyone who picks a name on a shared phone can clock in as someone else. The selfie and the site manager's tap are the real proof. The production version should lock a phone to one worker after the first sign-in.
-9. **PDPA:** worker photos are personal data. The production version needs a written consent notice for workers and a proper retention job on the server.
-10. **e-Invoicing (LHDN MyInvois)** is being phased in. Accountants will ask for supplier TIN and e-invoice numbers. Plan fields for it before production.
+9. **The history is only as safe as where it is stored.** In this prototype it lives in the browser, and "Clear everything" wipes it. The real version must keep it on the server, append-only, with no delete button for anyone, including management. Otherwise it can't protect workers in a pay dispute.
+10. **PDPA:** worker photos are personal data. The production version needs a written consent notice for workers and a proper retention job on the server.
+11. **e-Invoicing (LHDN MyInvois)** is being phased in. Accountants will ask for supplier TIN and e-invoice numbers. Plan fields for it before production.
 
 ## 9. Change log
+
+### v0.5.0 — 20 Nov 2026 — history (audit trail), undo, Rejected bin
+Client request: "audit trail of what the site manager and construction workers did, an undo button, and a trash place for rejected workers in case the manager pressed it by accident; the audit trail is to protect the workers".
+- **History (☰ menu → History)** for management and site managers. It records every attendance action: worker selfie clock-in/out, site manager photo clock-in/out, confirm, approve, approve all, change hours (exact before → after values, e.g. "OT 1h → 3h"), add by hand, back to automatic, reject, restore, worker reports, report sorted, and undo. Each entry has who, their role, date, time, which worker's day and the reason.
+  - **Can't be edited or deleted.** Undo adds a new "undid: …" entry instead of removing anything.
+  - Grouped by day, with a search box (worker or person) and filters: Everyone, Site manager, Workers, Management.
+  - **Download** (management) as a CSV file, e.g. as evidence in a pay dispute.
+  - Each worker row on Check attendance shows that day's history when opened.
+- **Workers see their own history** ("My history" on the worker screen): every clock-in, confirmation, change, rejection and restore of their days, with the reason. They are also notified when their day is changed, rejected or restored.
+- **Undo:** after confirm, approve, approve all, change, add by hand, reject, restore, photo clock-in/out or sorting a report, the message at the bottom shows an **Undo** button for 8 seconds.
+- **Rejecting needs a reason** (Not on site, Photo is not this worker, Clocked in twice, Left early without asking, Other, plus optional details). The worker sees the reason in "My days".
+- **Rejected bin:** rejected days leave the Everyone list and go to a new **Rejected** tab (per day) and a **Rejected days** page (☰ menu, all days). They are never deleted, and **Restore** puts a day back to waiting for a check.
+- Sample data includes about 190 history entries for the last few days.
+- History text is in English only on the worker screen for now (the buttons stay translated).
 
 ### v0.4.3 — 20 Nov 2026 — less text everywhere, compact attendance list
 Client feedback: "it still looks very messy and cluttered, the words are everywhere". Six changes, each approved one by one:
