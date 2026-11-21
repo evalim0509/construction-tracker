@@ -183,7 +183,7 @@ one are clocked in by the site manager with a photo, as before.
 ## 7. How it works (technical)
 
 - **No build step.** `index.html` loads `styles.css`, `three.min.js` (3D library, MIT, bundled locally), `factory3d.js`, `sample-data.js` and `app.js`.
-- **Updates reach phones straight away:** `index.html` links every file with a version number (`app.js?v=0.6.3`). Bump it on each release so browsers don't keep showing an old cached copy (GitHub Pages lets browsers cache files for 10 minutes).
+- **Updates reach phones straight away:** `index.html` links every file with a version number (`app.js?v=0.6.4`). Bump it on each release so browsers don't keep showing an old cached copy (GitHub Pages lets browsers cache files for 10 minutes).
 - **Data:** everything except photos is one JSON object in `localStorage` (`sitebook-data-v1`). Photos are compressed to ~720px JPEG and kept in **IndexedDB** (`sitebook-photos`).
 - **Screens** are functions returning HTML; clicks are handled in one place through `data-action` attributes.
 - **3D buildings** (`factory3d.js`): each project gets its own randomly generated factory (sawtooth roof, silos) or warehouse (gable roof, loading docks), seeded by the project id. The model shows progress: steel frame → walls going up (teal) → finished, with a tower crane until 92%. One shared WebGL view plus one for still thumbnails. Falls back to a line drawing if WebGL is not available.
@@ -248,6 +248,13 @@ Site manager only worker has no phone                             → neutral, n
 11. **e-Invoicing (LHDN MyInvois)** is being phased in. Accountants will ask for supplier TIN and e-invoice numbers. Plan fields for it before production.
 
 ## 9. Change log
+
+### v0.6.4 — 21 Nov 2026 — comfortable phone calendar
+Client feedback: "on mobile, the calendar needs more whitespace — each month is too close to the next, the view is too compact; I want a comfortable view."
+- **One roomy month at a time on phones:** the month now fills 88% of the screen width (it was 78% with overlapping neighbours), with 28px of clear space between months instead of the neighbours tucked in close.
+- **More breathing room inside the month:** more padding around the card, a larger month title (18px), more space under the weekday row, taller day cells (60px), bigger date numbers (15px) and the coloured project lines spaced further apart.
+- **Position dots replace the peeks:** at this width the next month no longer peeks in, so a row of small dots under the calendar shows where you are (the current month is a longer dark dash). It updates as you swipe.
+- Desktop is unchanged (the focus carousel with shrunk neighbours stays).
 
 ### v0.6.3 — 21 Nov 2026 — focus carousel, legend instead of names, back buttons everywhere
 Client feedback (with a reference image of a card carousel): "swipe like this: the current month bigger, the next month smaller; don't write project names on the calendar, use a legend; clean but intuitive; the back-to-main-calendar button on top instead of the bottom; back buttons on all pages."

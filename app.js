@@ -886,7 +886,8 @@
       (can.manage() || role() === "site" ? '<button class="btn btn-primary btn-sm" data-action="open-assign">' + icon("users") + "Book a crew</button>" : "") + "</div>" +
       legend +
       '<div class="row-between" style="margin:10px 0 8px"><div class="cal-head"><button class="icon-btn sm" data-action="car-step" data-step="-1" aria-label="Previous month">' + icon("left") + '</button><button class="icon-btn sm" data-action="car-step" data-step="1" aria-label="Next month">' + icon("right") + '</button></div><button class="btn btn-sm" data-action="cal-today">Today</button></div>' +
-      '<div class="cal-car" id="calCar">' + months.map(monthCard).join("") + "</div>";
+      '<div class="cal-car" id="calCar">' + months.map(monthCard).join("") + "</div>" +
+      '<div class="car-dots" aria-hidden="true">' + months.map((m) => '<i data-ym="' + m + '"></i>').join("") + "</div>";
   }
 
   /* Carousel: the month in focus sits in the middle at full size; neighbours shrink and peek in from the sides.
@@ -910,6 +911,8 @@
       c.style.opacity = (1 - 0.25 * t).toFixed(3);
       c.classList.toggle("focus", t < 0.5);
     });
+    const f = car.el.querySelector(".cm-month.focus");
+    document.querySelectorAll(".car-dots i").forEach((d) => d.classList.toggle("on", !!f && d.dataset.ym === f.dataset.ym));
   }
   function setupCarousel() {
     const el = $("#calCar"); car.el = el; if (!el) return;
