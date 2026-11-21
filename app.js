@@ -911,29 +911,32 @@
       c.style.opacity = (1 - 0.25 * t).toFixed(3);
       c.classList.toggle("focus", t < 0.5);
     });
-    // phones: the calendar is as tall as the month in view (blending while swiping), so short months sit up under the header
-    if (isPhone()) {
-      let w = 0, h = 0;
-      Array.from(car.el.children).forEach((c) => {
-        const cMid = c.offsetLeft - car.el.offsetLeft + c.offsetWidth / 2;
-        const k = 1 - Math.min(1, Math.abs(cMid - mid) / (c.offsetWidth + 28));
-        if (k > 0) { w += k; h += k * c.offsetHeight; }
-      });
-      if (w) car.el.style.height = Math.round(h / w + 36) + "px";
-    } else car.el.style.height = "";
     const f = car.el.querySelector(".cm-month.focus");
     document.querySelectorAll(".car-dots i").forEach((d) => d.classList.toggle("on", !!f && d.dataset.ym === f.dataset.ym));
+  }
+  /* phones: the calendar is as tall as the month in view, so short months sit up under the header.
+     The height never changes frame by frame (that made swiping shaky): it changes once when a swipe starts
+     (room for the months either side) and once when it settles (fits the new month), both eased by CSS. */
+  function carHeight(moving) {
+    const el = car.el; if (!el) return;
+    if (!isPhone()) { el.style.height = ""; return; }
+    const cards = Array.from(el.children);
+    const i = cards.indexOf(carNearest(el.scrollLeft));
+    const near = moving ? cards.slice(Math.max(0, i - 1), i + 2) : [cards[i]];
+    const h = Math.max(...near.map((c) => c.offsetHeight)) + 36;
+    if (el.style.height !== h + "px") el.style.height = h + "px";
   }
   function setupCarousel() {
     const el = $("#calCar"); car.el = el; if (!el) return;
     const start = el.querySelector('[data-ym="' + ui.calMonth + '"]');
     if (start) el.scrollLeft = centerLeft(start);
-    carPaint();
-    let tmr = 0;
+    carPaint(); carHeight(false);
+    let tmr = 0, moving = false;
     el.addEventListener("scroll", () => {
       if (!car.raf) car.raf = requestAnimationFrame(carPaint);
+      if (!moving) { moving = true; carHeight(true); }
       clearTimeout(tmr);
-      tmr = setTimeout(() => { ui.calMonth = carNearest(el.scrollLeft).dataset.ym; }, 120);
+      tmr = setTimeout(() => { moving = false; ui.calMonth = carNearest(el.scrollLeft).dataset.ym; carHeight(false); }, 120);
     }, { passive: true });
     el.addEventListener("pointerdown", (e) => {
       if (e.pointerType !== "mouse" || e.button !== 0) return;
@@ -962,7 +965,7 @@
   }
   window.addEventListener("pointerup", carEndDrag);
   window.addEventListener("pointercancel", carEndDrag);
-  window.addEventListener("resize", () => { if (car.el && car.el.isConnected) { const c = car.el.querySelector('[data-ym="' + ui.calMonth + '"]'); if (c) car.el.scrollLeft = centerLeft(c); carPaint(); } });
+  window.addEventListener("resize", () => { if (car.el && car.el.isConnected) { const c = car.el.querySelector('[data-ym="' + ui.calMonth + '"]'); if (c) car.el.scrollLeft = centerLeft(c); carPaint(); carHeight(false); } });
   function carGo(ym) {
     if (!car.el) return;
     const c = car.el.querySelector('[data-ym="' + ym + '"]'); if (!c) return;

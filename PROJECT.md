@@ -183,7 +183,7 @@ one are clocked in by the site manager with a photo, as before.
 ## 7. How it works (technical)
 
 - **No build step.** `index.html` loads `styles.css`, `three.min.js` (3D library, MIT, bundled locally), `factory3d.js`, `sample-data.js` and `app.js`.
-- **Updates reach phones straight away:** `index.html` links every file with a version number (`app.js?v=0.6.5`). Bump it on each release so browsers don't keep showing an old cached copy (GitHub Pages lets browsers cache files for 10 minutes).
+- **Updates reach phones straight away:** `index.html` links every file with a version number (`app.js?v=0.6.6`). Bump it on each release so browsers don't keep showing an old cached copy (GitHub Pages lets browsers cache files for 10 minutes).
 - **Data:** everything except photos is one JSON object in `localStorage` (`sitebook-data-v1`). Photos are compressed to ~720px JPEG and kept in **IndexedDB** (`sitebook-photos`).
 - **Screens** are functions returning HTML; clicks are handled in one place through `data-action` attributes.
 - **3D buildings** (`factory3d.js`): each project gets its own randomly generated factory (sawtooth roof, silos) or warehouse (gable roof, loading docks), seeded by the project id. The model shows progress: steel frame → walls going up (teal) → finished, with a tower crane until 92%. One shared WebGL view plus one for still thumbnails. Falls back to a line drawing if WebGL is not available.
@@ -248,6 +248,11 @@ Site manager only worker has no phone                             → neutral, n
 11. **e-Invoicing (LHDN MyInvois)** is being phased in. Accountants will ask for supplier TIN and e-invoice numbers. Plan fields for it before production.
 
 ## 9. Change log
+
+### v0.6.6 — 21 Nov 2026 — smooth phone swiping again
+Client feedback: "now the swiping animation is shaky, make it smooth like previously."
+- **Cause:** v0.6.5 resized the calendar on every frame of a swipe (blending between two months' heights), so the page re-laid itself out under the finger.
+- **Fix:** the height now changes only twice per swipe, each eased over 0.3s: when the swipe starts it opens up to fit the month in view and its neighbours (so nothing is cut off as a taller month slides in), and once the swipe settles it fits the new month. During the swipe itself nothing changes size, so it is as smooth as before. Short months still sit right under the header.
 
 ### v0.6.5 — 21 Nov 2026 — short months sit up under the header (phones)
 Client feedback (screenshot of February 2027 floating halfway down the screen): "when the calendar is smaller and shorter, position it closer to the header on mobile."
