@@ -183,7 +183,7 @@ one are clocked in by the site manager with a photo, as before.
 ## 7. How it works (technical)
 
 - **No build step.** `index.html` loads `styles.css`, `three.min.js` (3D library, MIT, bundled locally), `factory3d.js`, `sample-data.js` and `app.js`.
-- **Updates reach phones straight away:** `index.html` links every file with a version number (`app.js?v=0.6.1`). Bump it on each release so browsers don't keep showing an old cached copy (GitHub Pages lets browsers cache files for 10 minutes).
+- **Updates reach phones straight away:** `index.html` links every file with a version number (`app.js?v=0.6.2`). Bump it on each release so browsers don't keep showing an old cached copy (GitHub Pages lets browsers cache files for 10 minutes).
 - **Data:** everything except photos is one JSON object in `localStorage` (`sitebook-data-v1`). Photos are compressed to ~720px JPEG and kept in **IndexedDB** (`sitebook-photos`).
 - **Screens** are functions returning HTML; clicks are handled in one place through `data-action` attributes.
 - **3D buildings** (`factory3d.js`): each project gets its own randomly generated factory (sawtooth roof, silos) or warehouse (gable roof, loading docks), seeded by the project id. The model shows progress: steel frame → walls going up (teal) → finished, with a tower crane until 92%. One shared WebGL view plus one for still thumbnails. Falls back to a line drawing if WebGL is not available.
@@ -248,6 +248,13 @@ Site manager only worker has no phone                             → neutral, n
 11. **e-Invoicing (LHDN MyInvois)** is being phased in. Accountants will ask for supplier TIN and e-invoice numbers. Plan fields for it before production.
 
 ## 9. Change log
+
+### v0.6.2 — 21 Nov 2026 — calmer calendar, project-only hover
+Client feedback: "make the current month slightly bigger; the projects look packed, just coloured bars all over; in a project calendar the hover shows crews in other projects, I only want what's relevant to that project."
+- **Projects are thin coloured lines** (3px) instead of filled bars, with the project name written once per week in small grey text above the line. Hovering a line underlines the name; tapping it still opens the project calendar.
+- **The current month is wider** than the others on a laptop (about 54% vs 40% of the width), so this month reads first, the next month sits beside it and the one after peeks in. Phones still show one month at a time.
+- **Project calendar hover shows only that project:** crews here (with head count), crews free to book, and this project's materials with the stock check. Crews working on other projects are no longer listed.
+- Fixed: dragging the calendar with a mouse could start the browser's own "drag this link" and leave the calendar stuck in drag mode (days not clickable). Snapping now turns back on only after the slide finishes, so a drag always lands on the month you aimed for.
 
 ### v0.6.1 — 21 Nov 2026 — swipeable calendar
 Client feedback: "date numbers slightly larger, project text and coloured line slightly smaller; swipe horizontally like a carousel; show November smaller with December fully next to it and a little of January, with a smooth swiping motion."

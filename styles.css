@@ -801,6 +801,8 @@ button.back { border: 0; background: none; padding: 0; cursor: pointer; font: in
 .cal-car { display: grid; grid-auto-flow: column; grid-auto-columns: calc((100% - 32px) / 2.12); gap: 16px; overflow-x: auto; overflow-y: hidden;
   scroll-snap-type: x mandatory; overscroll-behavior-x: contain; scrollbar-width: none; padding: 1px 1px 6px; -webkit-overflow-scrolling: touch; cursor: grab; }
 .cal-car::-webkit-scrollbar { display: none; }
+.cal-car { user-select: none; -webkit-user-select: none; }
+.cal-car a { -webkit-user-drag: none; }
 .cal-car.dragging { scroll-snap-type: none; cursor: grabbing; user-select: none; }
 .cal-car.dragging .cm-bar, .cal-car.dragging .cm-day { pointer-events: none; }
 .cal-car > .cm-month { scroll-snap-align: start; margin: 0; min-width: 0; }
@@ -813,6 +815,17 @@ button.back { border: 0; background: none; padding: 0; cursor: pointer; font: in
 .cm-day.out:hover { background: none; }
 .float-pop { position: fixed; display: block; z-index: 70; top: 0; left: 0; }
 .float-pop[hidden] { display: none; }
+
+
+/* ---------- v0.6.2: thin project lines, wider current month ---------- */
+.cal-car { display: flex; }
+.cal-car > .cm-month { flex: 0 0 calc((100% - 32px) * 0.405); }
+.cal-car > .cm-month.cm-now { flex-basis: calc((100% - 32px) * 0.54); }
+.cm-line { z-index: 2; margin: 0 4px; display: flex; flex-direction: column; justify-content: flex-end; gap: 2px; min-width: 0; text-decoration: none; color: var(--ink-2); }
+.cm-lname { font-size: 10.5px; font-weight: 500; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--ink-2); }
+.cm-line i { display: block; height: 3px; border-radius: 2px; background: var(--c); opacity: .85; }
+.cm-line:hover .cm-lname { color: var(--ink); text-decoration: underline; text-underline-offset: 2px; }
+.cm-line:hover i { opacity: 1; height: 4px; }
 
 /* ---------- Bottom nav (phones) ---------- */
 .bottomnav { display: none; }
@@ -884,6 +897,10 @@ button.back { border: 0; background: none; padding: 0; cursor: pointer; font: in
   .cal-month { min-width: 0; font-size: 18px; }
   .day-panel { margin-top: 0; }
   .mobile-only { display: flex !important; }
+  .cal-car > .cm-month, .cal-car > .cm-month.cm-now { flex-basis: 88%; }
+  .cm-line { margin: 0 2px; }
+  .cm-lname { font-size: 9.5px; }
+
   .cal-car { grid-auto-columns: 88%; gap: 10px; margin: 0 -16px; padding: 1px 16px 6px; scroll-padding: 0 16px; }
   .cal-car > .cm-month { margin: 0; }
   .cm-day .cm-n { font-size: 14px; width: 24px; height: 24px; }

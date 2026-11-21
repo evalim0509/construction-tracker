@@ -869,11 +869,11 @@
       }).join("");
       const bars = segs.map((x) => {
         const cs = Array.from(new Set(wk.slice(x.a, x.b + 1).flatMap((d) => assignmentsOn(d).filter((a) => a.projectId === x.p.id).map((a) => a.crewId)))).map(crew).filter(Boolean);
-        return '<a class="cm-bar" href="#/project/' + x.p.id + '" data-action="cal-proj" data-id="' + x.p.id + '" data-m="' + ym + '" style="--c:' + x.p.color + ";grid-column:" + (x.a + 1) + " / " + (x.b + 2) + ";grid-row:" + (lanes.indexOf(x.p.id) + 2) + '" title="' + esc(x.p.name + ": " + crewNames(cs) + ". Open its calendar.") + '">' + esc(x.b > x.a ? x.p.name : shortName(x.p)) + "</a>";
+        return '<a class="cm-line" href="#/project/' + x.p.id + '" data-action="cal-proj" data-id="' + x.p.id + '" data-m="' + ym + '" style="--c:' + x.p.color + ";grid-column:" + (x.a + 1) + " / " + (x.b + 2) + ";grid-row:" + (lanes.indexOf(x.p.id) + 2) + '" title="' + esc(x.p.name + ": " + crewNames(cs) + ". Open its calendar.") + '"><span class="cm-lname">' + esc(x.b - x.a >= 2 ? x.p.name : shortName(x.p)) + "</span><i></i></a>";
       }).join("");
-      return '<div class="cm-week" style="grid-template-rows:30px ' + (rows ? "repeat(" + rows + ", 18px) " : "") + '18px">' + cells + bars + "</div>";
+      return '<div class="cm-week" style="grid-template-rows:32px ' + (rows ? "repeat(" + rows + ", 21px) " : "") + '20px">' + cells + bars + "</div>";
     }).join("");
-    return '<section class="card cm cm-month" data-ym="' + ym + '"><h2 class="cm-title">' + MON_LONG[mm - 1] + " " + yy + '</h2><div class="cm-dows">' + ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((x) => "<span>" + x + "</span>").join("") + "</div>" + html + "</section>";
+    return '<section class="card cm cm-month' + (ym === monthKey(today()) ? " cm-now" : "") + '" data-ym="' + ym + '"><h2 class="cm-title">' + MON_LONG[mm - 1] + " " + yy + '</h2><div class="cm-dows">' + ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((x) => "<span>" + x + "</span>").join("") + "</div>" + html + "</section>";
   }
   // months shown in the carousel: 3 back, 11 ahead
   function calMonths() { const out = []; for (let i = -3; i <= 11; i++) out.push(shiftMonth(monthKey(today()), i)); return out; }
@@ -916,22 +916,28 @@
       if (!drag.moved && Math.abs(dx) > 6) { drag.moved = true; car.classList.add("dragging"); hideHoverPop(); }
       if (drag.moved) car.scrollLeft = drag.left - dx;
     });
-    window.addEventListener("pointerup", () => {
+    // links and text inside the carousel must not start the browser's own drag
+    car.addEventListener("dragstart", (e) => e.preventDefault());
+    const endDrag = () => {
       if (!drag) return;
       const moved = drag.moved, startLeft = drag.left;
       drag = null;
       if (!moved) return;
-      car.classList.remove("dragging");
       // settle on the nearest month, leaning in the direction of the drag
-      const cards = Array.from(car.children), w = cards[0].offsetWidth + 16;
-      const dir = car.scrollLeft > startLeft ? 0.35 : -0.35;
-      const idx = Math.max(0, Math.min(cards.length - 1, Math.round(car.scrollLeft / w + dir)));
-      car.scrollTo({ left: cards[idx].offsetLeft - car.offsetLeft, behavior: "smooth" });
+      const cards = Array.from(car.children);
+      const aim = car.scrollLeft + (car.scrollLeft > startLeft ? 0.35 : -0.35) * cards[1].offsetWidth;
+      let best = cards[0];
+      cards.forEach((c) => { if (Math.abs(c.offsetLeft - car.offsetLeft - aim) < Math.abs(best.offsetLeft - car.offsetLeft - aim)) best = c; });
+      car.scrollTo({ left: best.offsetLeft - car.offsetLeft, behavior: "smooth" });
+      // turn snapping back on only after the slide has finished, so it can't pull the calendar back
+      setTimeout(() => car.classList.remove("dragging"), 500);
       // swallow the click that ends a drag
       const stop = (ev) => { ev.stopPropagation(); ev.preventDefault(); window.removeEventListener("click", stop, true); };
       window.addEventListener("click", stop, true);
       setTimeout(() => window.removeEventListener("click", stop, true), 50);
-    });
+    };
+    window.addEventListener("pointerup", endDrag);
+    window.addEventListener("pointercancel", endDrag);
   }
   function carStep(step) {
     const car = $("#calCar"); if (!car) return;
@@ -970,8 +976,7 @@
     const free = freeCrews(d);
     h += '<ul class="pop-list">' +
       (sunday ? "" : '<li><span class="key k-here"></span><b>Here:</b> ' + (here.length ? esc(crewNames(here)) + ' <span class="muted">(' + sum(here, (c) => crewWorkers(c.id).length) + " people)</span>" : '<span class="muted">none</span>') + "</li>" +
-      '<li><span class="key k-else"></span><b>Other projects:</b> ' + (other.length ? other.map((a) => esc(crew(a.crewId).name) + ' <span class="muted">(' + esc(shortName(project(a.projectId))) + ")</span>").join(", ") : '<span class="muted">none</span>') + "</li>" +
-      '<li><span class="key k-free"></span><b>Free:</b> ' + (free.length ? esc(crewNames(free)) : '<span class="muted">none</span>') + "</li></ul>");
+      '<li><span class="key k-free"></span><b>Free to book:</b> ' + (free.length ? esc(crewNames(free)) : '<span class="muted">none</span>') + "</li></ul>");
     const needs = S.needs.filter((n) => n.projectId === p.id && n.by === d);
     if (needs.length) {
       h += '<div class="pop-sub">Materials due</div><ul class="pop-list">' + needs.map((n) => {
@@ -2371,7 +2376,7 @@
     const pop = $("#hoverPop");
     if (pop && pop.contains(e.target)) { clearTimeout(hoverTmr); return; }
     const el = e.target.closest("[data-hover]");
-    if (el && !(e.target.closest(".cm-bar")) && !document.querySelector(".cal-car.dragging")) { clearTimeout(hoverTmr); hoverTmr = setTimeout(() => showHoverPop(el), 120); return; }
+    if (el && !(e.target.closest(".cm-line")) && !document.querySelector(".cal-car.dragging")) { clearTimeout(hoverTmr); hoverTmr = setTimeout(() => showHoverPop(el), 120); return; }
     clearTimeout(hoverTmr); hoverTmr = setTimeout(hideHoverPop, 200);
   });
   document.addEventListener("input", (e) => {
