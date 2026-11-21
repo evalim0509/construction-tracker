@@ -183,7 +183,7 @@ one are clocked in by the site manager with a photo, as before.
 ## 7. How it works (technical)
 
 - **No build step.** `index.html` loads `styles.css`, `three.min.js` (3D library, MIT, bundled locally), `factory3d.js`, `sample-data.js` and `app.js`.
-- **Updates reach phones straight away:** `index.html` links every file with a version number (`app.js?v=0.7.1`). Bump it on each release so browsers don't keep showing an old cached copy (GitHub Pages lets browsers cache files for 10 minutes).
+- **Updates reach phones straight away:** `index.html` links every file with a version number (`app.js?v=0.8.0`). Bump it on each release so browsers don't keep showing an old cached copy (GitHub Pages lets browsers cache files for 10 minutes).
 - **Data:** everything except photos is one JSON object in `localStorage` (`sitebook-data-v1`). Photos are compressed to ~720px JPEG and kept in **IndexedDB** (`sitebook-photos`).
 - **Screens** are functions returning HTML; clicks are handled in one place through `data-action` attributes.
 - **3D buildings** (`factory3d.js`): each project gets its own randomly generated factory (sawtooth roof, silos) or warehouse (gable roof, loading docks), seeded by the project id. The model shows progress: steel frame → walls going up (teal) → finished, with a tower crane until 92%. One shared WebGL view plus one for still thumbnails. Falls back to a line drawing if WebGL is not available.
@@ -248,6 +248,25 @@ Site manager only worker has no phone                             → neutral, n
 11. **e-Invoicing (LHDN MyInvois)** is being phased in. Accountants will ask for supplier TIN and e-invoice numbers. Plan fields for it before production.
 
 ## 9. Change log
+
+### v0.8.0 — 21 Nov 2026 — planned vs actual phases on the project calendar
+Client: "for the project-specific calendar, I want current phases and planned phases." UI decided question by question:
+
+| # | Question | Answer |
+|---|---|---|
+| PH1 | Where do phases go? | **Timeline strip above the calendar**; the day calendar below stays as it is (crews, deliveries) |
+| PH2 | Planned vs actual | **Two thin bars per phase**: top = planned, bottom = what really happened |
+| PH3 | Colours | **Status colours**: planned grey; actual in the project colour while on time, **amber past the planned finish**, **green ✓ when done on time** |
+| PH4 | Time span | **Same month as the calendar**, moves with ‹ ›; phases outside the month are hidden ("3 phases before, 1 after this month"); cut ends are squared off |
+| PH5 | Recording real dates | **One-tap buttons**: "Started today" / "Finished today"; after finishing, "Start <next phase> today"; "Not finished after all"; dates can be changed. Undo and History on every change |
+| PH6 | Planned dates | **Filled in automatically, then adjusted**: the project's original start–finish is split by typical share (piling 10%, foundation 20%, steel 20%, roofing 15%, M&E 20%, handover 15%; equal shares for other phase lists). "Change dates" edits planned and real dates; moving a planned finish can move the later phases by the same days |
+| PH7 | Phone layout | **Phase name and status above its bars**, bars full width; one-line summary on top: "Now: Roofing & wall cladding · day 28 of 28 · 6 days behind plan" |
+
+- **Status per phase:** Done / Done, N days late / On track / Started N days late / N days behind plan / Should have started N days ago / Starts 7 Dec.
+- **Who can change:** management and site managers (same as ticking phases). Others see the timeline but cannot tap it.
+- **Also updated:** the phase list (Progress tab, Work phases card) shows each phase's planned dates and status; the project's top card now shows the current phase's status (e.g. "6 days behind plan") instead of a separate "On time" that could contradict it; ticking a phase also records when it started.
+- **Data:** each phase gets `planStart`, `planEnd`, `startedOn` (+ existing `done`, `doneOn`); projects get `phasePlanV`. Existing data is upgraded on load: plans are filled in from the project dates, and real starts are worked out from the previous phase's finish. Sample projects now have realistic slips (e.g. Klang steel started 12 days late after rain and late steel).
+- Undo now restores whatever the step changed (projects as well as attendance).
 
 ### v0.7.1 — 21 Nov 2026 — face check fixed on iPhones; worker sees the result
 Client test on an iPhone (woman clocks in, man clocks out): management saw "No face in selfie" although the clock-in selfie clearly shows a face, and the worker saw no warning at all.

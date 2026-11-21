@@ -39,29 +39,26 @@
     const pick = (arr) => arr[Math.floor(r() * arr.length)];
 
     const PHASES = ["Site clearing & piling", "Foundation & ground slab", "Steel structure", "Roofing & wall cladding", "M&E (electrical, plumbing, fire)", "Finishing & handover"];
-    const mkPhases = (pid, doneCount) => PHASES.map((name, i) => ({ id: pid + "-ph" + i, name, done: i < doneCount, doneOn: i < doneCount ? D(-120 + i * 18) : null }));
+    // slips: [days late starting, days late finishing] per phase; the app turns them into real dates against the plan
+    const mkPhases = (pid, doneCount, slips) => PHASES.map((name, i) => Object.assign({ id: pid + "-ph" + i, name, done: i < doneCount, doneOn: null }, slips && slips[i] ? { slip: slips[i] } : {}));
 
     const projects = [
       { id: "p1", name: "Shah Alam Factory", client: "Sinar Packaging Sdn Bhd", location: "Seksyen 26, Shah Alam", type: "factory",
-        start: D(-130), end: D(62), originalEnd: D(62), value: 4800000, phases: mkPhases("p1", 3), delays: [], color: "#0F7F82" },
+        start: D(-130), end: D(62), originalEnd: D(62), value: 4800000, phases: mkPhases("p1", 3, [[0, -2], [-1, 4], [4, 6], [6]]), delays: [], color: "#0F7F82" },
       { id: "p2", name: "Klang Warehouse", client: "Pelabuhan Jaya Logistics", location: "Pulau Indah, Klang", type: "warehouse",
-        start: D(-75), end: D(128), originalEnd: D(116), value: 3200000, phases: mkPhases("p2", 2),
+        start: D(-75), end: D(128), originalEnd: D(116), value: 3200000, phases: mkPhases("p2", 2, [[0, 5], [5, 12], [12]]),
         delays: [
           { id: "d1", date: D(-34), days: 5, reason: "Rain", note: "Heavy rain for most of the week, piling stopped.", by: "site" },
           { id: "d2", date: D(-12), days: 7, reason: "Material late", note: "Steel beams from supplier came 1 week late.", by: "site" }
         ], color: "#3563C4" },
       { id: "p3", name: "Senai Factory Extension", client: "Johor Precision Parts", location: "Senai, Johor", type: "factory",
-        start: D(-210), end: D(24), originalEnd: D(4), value: 2650000, phases: mkPhases("p3", 5),
+        start: D(-210), end: D(24), originalEnd: D(4), value: 2650000, phases: mkPhases("p3", 5, [[0, 0], [0, 3], [3, 8], [8, 14], [14, 20], [20]]),
         delays: [{ id: "d3", date: D(-40), days: 20, reason: "Client changed plans", note: "Client added a second loading bay. Extra works approved.", by: "boss" }], color: "#7A5CC9" },
       { id: "p4", name: "Nilai Cold Storage", client: "Fresh Hub Distribution", location: "Nilai, Negeri Sembilan", type: "warehouse",
-        start: D(-24), end: D(215), originalEnd: D(215), value: 5900000, phases: mkPhases("p4", 0), delays: [], color: "#4F8F5B" },
+        start: D(-24), end: D(215), originalEnd: D(215), value: 5900000, phases: mkPhases("p4", 0, [[1]]), delays: [], color: "#4F8F5B" },
       { id: "p5", name: "Rawang Workshop", client: "Tekno Fabrication", location: "Rawang, Selangor", type: "factory",
         start: D(16), end: D(180), originalEnd: D(180), value: 1750000, phases: mkPhases("p5", 0), delays: [], color: "#B9832F" }
     ];
-    // phase 1 of Nilai in progress, mark nothing done; fix doneOn for p3 later phases
-    projects[2].phases.forEach((ph, i) => { if (ph.done) ph.doneOn = D(-200 + i * 38); });
-    projects[1].phases.forEach((ph, i) => { if (ph.done) ph.doneOn = D(-60 + i * 22); });
-    projects[0].phases.forEach((ph, i) => { if (ph.done) ph.doneOn = D(-110 + i * 30); });
 
     const crewDefs = [
       { id: "c1", name: "Crew A", trade: "Structure & concrete", names: ["Rahim Osman", "Mohd Hafiz", "Agus Santoso", "Budi Hartono", "Md. Karim Uddin", "Rafiqul Islam", "Suresh Kumar", "Ram Bahadur Thapa", "Tan Ah Kow", "Jamal Hossain"] },

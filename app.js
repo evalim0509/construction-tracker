@@ -134,6 +134,64 @@
     S.settings = Object.assign({ matchMinutes: 15, payDay: 7, geofenceM: 200, rounding: "exact", rejectReasons: ["Not on site", "Photo is not this worker", "Clocked in twice", "Left early without asking"] }, S.settings);
     // keep the site manager's original photo times, so later changes never overwrite them
     S.attendance.forEach((a) => { if (!a.orig && a.inPhoto && a.in && !(a.self && a.self.in === a.in)) a.orig = { in: a.in, out: a.outPhoto ? a.out : null }; });
+    S.projects.forEach(planPhases);
+  }
+  /* Phases: planned dates (planStart/planEnd) and real dates (startedOn/doneOn).
+     The plan is filled in once from the project's original dates, split by a typical share per phase;
+     anyone allowed can then adjust it. Real dates come from the one-tap Started / Finished buttons. */
+  const PHASE_SHARE = [10, 20, 20, 15, 20, 15];   // % of the job: piling, foundation, steel, roofing, M&E, handover
+  function planPhases(p) {
+    const ph = p.phases || [];
+    if (!ph.length) return;
+    if (ph.some((x) => !x.planStart || !x.planEnd)) {
+      const total = diffDays(p.start, p.originalEnd || p.end) + 1;
+      const share = ph.length === PHASE_SHARE.length ? PHASE_SHARE : ph.map(() => 100 / ph.length);
+      let cum = 0;
+      ph.forEach((x, i) => {
+        const a = Math.round((total * cum) / 100); cum += share[i];
+        const b = i === ph.length - 1 ? total : Math.round((total * cum) / 100);
+        x.planStart = addDays(p.start, a); x.planEnd = addDays(p.start, Math.max(a, b - 1));
+      });
+    }
+    if (p.phasePlanV) return;
+    p.phasePlanV = 1;
+    // sample data gives slips (days late) instead of dates
+    ph.forEach((x) => {
+      if (!x.slip) return;
+      x.startedOn = addDays(x.planStart, x.slip[0]);
+      if (x.done) x.doneOn = addDays(x.planEnd, x.slip[1]);
+      delete x.slip;
+    });
+    // older data: work out real starts from the previous phase's finish
+    const t = today();
+    let prevEnd = null, allPrevDone = true;
+    ph.forEach((x) => {
+      if (!x.startedOn) {
+        const cand = prevEnd ? addDays(prevEnd, 1) : p.start;
+        if (x.done) x.startedOn = x.doneOn && cand > x.doneOn ? x.doneOn : cand;
+        else if (allPrevDone && p.start <= t) x.startedOn = cand <= t ? cand : t;
+      }
+      if (x.done) prevEnd = x.doneOn; else allPrevDone = false;
+    });
+  }
+  const fmtShort = (d) => { const x = parse(d); return x.getDate() + " " + MON[x.getMonth()]; };
+  const daysTxt = (n) => plural(n, "day");
+  // plain status of one phase
+  function phaseInfo(ph) {
+    const t = today(), len = diffDays(ph.planStart, ph.planEnd) + 1;
+    if (ph.done) {
+      const late = diffDays(ph.planEnd, ph.doneOn);
+      return late > 0 ? { key: "donelate", label: "Done, " + daysTxt(late) + " late", cls: "warn", len } : { key: "done", label: "Done", cls: "good", len };
+    }
+    if (ph.startedOn) {
+      const day = diffDays(ph.startedOn, t) + 1, over = diffDays(ph.planEnd, t), lateStart = diffDays(ph.planStart, ph.startedOn);
+      if (over > 0) return { key: "behind", label: daysTxt(over) + " behind plan", cls: "warn", len, day, behind: over };
+      if (lateStart > 0) return { key: "latestart", label: "Started " + daysTxt(lateStart) + " late", cls: "warn", len, day, behind: lateStart };
+      return { key: "ontrack", label: "On track", cls: "info", len, day };
+    }
+    const due = diffDays(ph.planStart, t);
+    if (due > 0) return { key: "due", label: "Should have started " + daysTxt(due) + " ago", cls: "warn", len };
+    return { key: "later", label: "Starts " + fmtShort(ph.planStart), cls: "", len };
   }
   function save() {
     try { localStorage.setItem(KEY, JSON.stringify(S)); }
@@ -323,6 +381,16 @@
     } catch (e) { res = null; }   // no check possible (e.g. no internet the first time): say nothing
     if (s.faceTok !== tok || ui.sheet !== s) return;
     s.desc = desc || undefined; s.face = res;
+    renderSheet();
+  }
+
+  // one-tap phase changes from the phase sheet, with Undo and a History entry
+  function phaseSet(phId, fn) {
+    const s = ui.sheet, p = project(s.id), ph = p && p.phases.find((x) => x.id === phId); if (!ph) return;
+    const snap = JSON.stringify({ projects: S.projects });
+    const what = fn(ph);
+    const e = log("phase", { projectId: p.id, value: "marked “" + esc(ph.name) + "” as " + what + " (" + esc(p.name) + ")" });
+    done("“" + esc(ph.name) + "” " + what + (what === "finished" ? ". Project is " + Math.round(progress(p) * 100) + "% done." : "."), snap, [e]);
     renderSheet();
   }
 
@@ -778,7 +846,8 @@
       '<div class="glass" style="text-align:right"><div class="hero-pct num">' + pct + '<span style="font-size:22px">%</span></div><div class="muted tiny">done</div></div></div>' +
       (mode === "3d" ? '<div class="hero-hint">Drag to turn</div>' : "") +
       '<div class="hero-foot"><div class="glass row-between wrap" style="gap:10px"><div class="grow"><div class="small muted">' + (np ? "Now working on" : "All phases done") + '</div><div style="font-weight:500">' + esc(np ? np.name : "Ready for handover") + "</div></div>" +
-      chip(st.label, st.cls) +
+      // the chip follows the phase being worked on, so it matches the phase timeline
+      (np && np.planStart && p.start <= today() ? chip(phaseInfo(np).label, phaseInfo(np).cls === "info" ? "good" : phaseInfo(np).cls) : chip(st.label, st.cls)) +
       (compact ? '<a class="btn btn-sm btn-dark" href="#/project/' + p.id + '">Open project</a>' : "") +
       (!compact && p.photo ? '<div class="seg-mini"><button class="' + (mode === "photo" ? "on" : "") + '" data-action="hero-mode" data-id="' + p.id + '" data-mode="photo">Photo</button><button class="' + (mode === "3d" ? "on" : "") + '" data-action="hero-mode" data-id="' + p.id + '" data-mode="3d">3D</button></div>' : "") +
       "</div></div></div>";
@@ -935,7 +1004,7 @@
       const isNow = np && np.id === ph.id;
       return '<div class="phase ' + (ph.done ? "done" : "") + '">' +
         '<button class="tick ' + (ph.done ? "on" : isNow ? "now" : "") + '" ' + (can.tick() ? 'data-action="tick" data-id="' + p.id + '" data-ph="' + ph.id + '"' : "disabled") + ' aria-label="' + (ph.done ? "Mark not done: " : "Mark done: ") + esc(ph.name) + '">' + icon("check") + "</button>" +
-        '<div class="li-main"><div class="li-title">' + esc(ph.name) + '</div><div class="li-sub">' + (ph.done ? "Done " + fmtDate(ph.doneOn) : isNow ? "Working on this now" : "Not started") + "</div></div></div>";
+        '<div class="li-main"><div class="li-title">' + esc(ph.name) + '</div><div class="li-sub">' + (ph.planStart ? "Planned " + fmtShort(ph.planStart) + " – " + fmtShort(ph.planEnd) + " · " : "") + esc(ph.planStart ? phaseInfo(ph).label : ph.done ? "Done " + fmtDate(ph.doneOn) : isNow ? "Working on this now" : "Not started") + "</div></div></div>";
     }).join("");
   }
 
@@ -1255,8 +1324,55 @@
     return (ui.calBack ? '<a class="back" style="margin:-4px 0 10px" href="#/calendar">' + icon("left") + "Back to the main calendar</a>" : "") +
       '<div class="row-between wrap" style="margin-bottom:10px">' + monthNav(ym, "pc-month") +
       '<div class="pc-legend"><span><i class="key k-here"></i>This project</span><span><i class="key k-else"></i>Other projects</span><span><i class="key k-free"></i>Free</span><span>' + icon("truck") + "Delivery</span></div></div>" +
+      phaseTimeline(p, ym) +
       '<div class="cm-dows">' + ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((x) => "<span>" + x + "</span>").join("") + '</div><div class="pc-grid">' + cells + "</div>" +
       "";
+  }
+  /* Phase timeline for one month, above the project calendar: per phase a thin planned bar (grey)
+     and a thin actual bar (project colour; amber past the planned end; green when done on time). */
+  function phaseTimeline(p, ym) {
+    if (!p.phases || !p.phases.length) return "";
+    const t = today(), m0 = ym + "-01", n = new Date(+ym.slice(0, 4), +ym.slice(5, 7), 0).getDate(), m1 = ym + "-" + pad(n);
+    const pos = (d) => Math.max(0, Math.min(100, (diffDays(m0, d) / n) * 100));
+    const bar = (a, b, cls, extra) => {
+      if (!a || !b || a > b || b < m0 || a > m1) return "";
+      const l = pos(a < m0 ? m0 : a), r = pos(addDays(b > m1 ? m1 : b, 1));
+      return '<i class="' + cls + (a < m0 ? " cut-l" : "") + (b > m1 ? " cut-r" : "") + '" style="left:' + l.toFixed(2) + "%;width:" + Math.max(0.8, r - l).toFixed(2) + '%"></i>' + (extra || "");
+    };
+    const todayLine = t >= m0 && t <= m1 ? '<span class="ptl-today" style="left:' + ((diffDays(m0, t) + 0.5) / n * 100).toFixed(2) + '%"></span>' : "";
+    const shown = [], hidden = { before: 0, after: 0 };
+    p.phases.forEach((ph) => {
+      const aEnd = ph.done ? ph.doneOn : ph.startedOn ? t : null;
+      const lo = [ph.planStart, ph.startedOn].filter(Boolean).sort()[0], hi = [ph.planEnd, aEnd].filter(Boolean).sort().pop();
+      if (hi < m0) hidden.before++; else if (lo > m1) hidden.after++; else shown.push(ph);
+    });
+    const rows = shown.map((ph) => {
+      const inf = phaseInfo(ph), aEnd = ph.done ? ph.doneOn : ph.startedOn ? t : null;
+      let actual = "";
+      if (ph.startedOn && aEnd) {
+        const onTime = ph.done && inf.key === "done";
+        actual = bar(ph.startedOn, aEnd < ph.planEnd ? aEnd : ph.planEnd, "ac" + (onTime ? " ok" : "")) +
+          bar(ph.startedOn > ph.planEnd ? ph.startedOn : addDays(ph.planEnd, 1), aEnd, "ac late") +
+          (!ph.done && aEnd >= m0 && aEnd <= m1 ? '<b class="ptl-go" style="left:' + pos(addDays(aEnd, 1)).toFixed(2) + '%"></b>' : "") +
+          (ph.done && aEnd >= m0 && aEnd <= m1 ? '<b class="ptl-tick' + (onTime ? "" : " late") + '" style="left:' + pos(addDays(aEnd, 1)).toFixed(2) + '%">' + icon("check") + "</b>" : "");
+      }
+      const tag = can.tick() ? 'button type="button" data-action="phase-open" data-id="' + p.id + '" data-ph="' + ph.id + '"' : "div";
+      return "<" + tag + ' class="ptl-row' + (inf.day ? " now" : "") + '"><span class="ptl-name"><b>' + esc(ph.name) + '</b><small class="' + inf.cls + '">' + esc(inf.label) + "</small></span>" +
+        '<span class="ptl-track">' + bar(ph.planStart, ph.planEnd, "pl") + actual + todayLine + "</span></" + tag.split(" ")[0] + ">";
+    }).join("");
+    const ticks = [1, 8, 15, 22, 29].filter((d) => d <= n).map((d) => '<span style="left:' + ((d - 1) / n * 100).toFixed(2) + '%">' + d + "</span>").join("");
+    // one-line summary: the phase being worked on now
+    const now = p.phases.find((x) => x.startedOn && !x.done), next = p.phases.find((x) => !x.done);
+    let sum;
+    if (now) { const inf = phaseInfo(now); sum = "Now: <b>" + esc(now.name) + "</b> · day " + inf.day + " of " + inf.len + ' · <span class="' + (inf.behind ? "warn" : "ok") + '">' + (inf.key === "behind" ? daysTxt(inf.behind) + " behind plan" : inf.key === "latestart" ? "started " + daysTxt(inf.behind) + " late" : "on track") + "</span>"; }
+    else if (next) sum = "Next: <b>" + esc(next.name) + "</b> · planned from " + fmtShort(next.planStart);
+    else sum = "<b>All phases done</b>";
+    const more = [hidden.before ? plural(hidden.before, "phase") + " before" : "", hidden.after ? plural(hidden.after, "phase") + " after" : ""].filter(Boolean).join(", ");
+    return '<div class="ptl" style="--pc:' + esc(p.color || "") + '">' +
+      '<div class="ptl-sum">' + sum + "</div>" +
+      (shown.length ? '<div class="ptl-head"><span class="ptl-name"></span><span class="ptl-track ptl-ticks">' + ticks + todayLine + "</span></div>" + rows : '<div class="muted small ptl-none">No phases this month.</div>') +
+      '<div class="ptl-foot"><span><i class="k pl"></i>Planned</span><span><i class="k ac"></i>Actual</span><span><i class="k late"></i>Past the plan</span><span><i class="k ok"></i>Done on time</span>' + (more ? '<span class="muted">' + more + " this month</span>" : "") + "</div>" +
+      "</div>";
   }
 
   /* ---------- Projects ---------- */
@@ -1962,6 +2078,30 @@
         '<button class="w-big mt-16" data-action="w-photo"' + (away ? " disabled" : "") + ">" + icon("camera") + "<span>" + tr("takePhoto") + "</span></button>" +
         '<p class="small muted mt-16" style="text-align:center">Demo: the location check is pretend. <button class="link-btn small" data-action="w-away">' + (away ? "Pretend I am at the site" : "Pretend I am not at the site") + "</button></p>";
     },
+    phase(s) {
+      const p = project(s.id), ph = p && p.phases.find((x) => x.id === s.ph);
+      if (!ph) return sheetHead("Phase");
+      const inf = phaseInfo(ph), i = p.phases.indexOf(ph), next = p.phases[i + 1];
+      const back = s.back ? '<button class="back" data-action="phase-back">' + icon("left") + "Back to the calendar</button>" : "";
+      const actual = ph.done ? "Started " + fmtShort(ph.startedOn) + ", finished " + fmtShort(ph.doneOn) + " (" + daysTxt(diffDays(ph.startedOn, ph.doneOn) + 1) + ")" :
+        ph.startedOn ? "Started " + fmtShort(ph.startedOn) + " · day " + inf.day + " of " + inf.len : "Not started yet";
+      let main = "";
+      if (!ph.startedOn) main = '<button class="btn btn-primary btn-big" data-action="phase-start" data-ph="' + ph.id + '">' + icon("check") + "Started today</button>";
+      else if (!ph.done) main = '<button class="btn btn-primary btn-big" data-action="phase-finish" data-ph="' + ph.id + '">' + icon("check") + "Finished today</button>";
+      else if (next && !next.startedOn) main = '<button class="btn btn-primary btn-big" data-action="phase-start" data-ph="' + next.id + '">' + icon("check") + "Start “" + esc(next.name) + "” today</button>";
+      const editing = s.edit;
+      const dateIn = (k, label, v) => '<label class="field"><span>' + label + '</span><input class="input" type="date" data-f="' + k + '" value="' + esc(val(k, v || "")) + '"></label>';
+      return back + sheetHead(esc(ph.name)) +
+        '<div class="ph-facts"><div><span class="muted">Planned</span><b>' + fmtShort(ph.planStart) + " – " + fmtShort(ph.planEnd) + "</b><small>" + daysTxt(inf.len) + "</small></div>" +
+        '<div><span class="muted">Actual</span><b>' + esc(actual) + "</b><small>" + chip(inf.label, inf.cls) + "</small></div></div>" +
+        (main ? '<div class="sheet-foot" style="margin-top:4px">' + main + "</div>" : "") +
+        (ph.done ? '<p class="small mt-8"><button class="link-btn small" data-action="phase-reopen" data-ph="' + ph.id + '">Not finished after all</button></p>' : "") +
+        (!editing ? '<p class="mt-16"><button class="btn btn-soft" data-action="phase-edit">' + icon("edit") + "Change dates</button></p>" :
+          '<div class="card mt-16" style="padding:14px"><div class="grid-2">' + dateIn("planStart", "Planned start", ph.planStart) + dateIn("planEnd", "Planned finish", ph.planEnd) +
+          dateIn("startedOn", "Actually started", ph.startedOn) + dateIn("doneOn", "Actually finished", ph.doneOn) + "</div>" +
+          (p.phases.slice(i + 1).length ? '<div class="field"><span>If the planned finish moves, move the later phases too?</span>' + choiceRow("shift", ["Yes, move them", "No, keep them"], val("shift", "Yes, move them")) + "</div>" : "") +
+          errBox() + '<div class="row" style="gap:8px"><button class="btn btn-soft" data-action="phase-edit">Cancel</button><button class="btn btn-primary" data-action="phase-save" data-ph="' + ph.id + '">' + icon("check") + "Save dates</button></div></div>");
+    },
     wreport() {
       const w = me();
       const days = S.attendance.filter((a) => a.workerId === w.id && a.date >= addDays(today(), -20)).map((a) => a.date);
@@ -2308,7 +2448,7 @@
     undo() {
       const u = ui.undo; if (!u) return;
       const o = JSON.parse(u.snap);
-      S.attendance = o.attendance; S.disputes = o.disputes; S.notifications = o.notifications;
+      Object.keys(o).forEach((k) => { S[k] = o[k]; });
       log("undo", { value: u.label });
       ui.undo = null; save(); render();
       if (ui.sheet && ui.sheet.type === "clock") renderSheet();
@@ -2485,9 +2625,39 @@
     "stock-clear"() { ui.stockQ = ""; render(); const n = $('[data-input="stockQ"]'); if (n) n.focus(); },
 
     /* projects */
+    "phase-open"(el) {
+      const back = ui.sheet && ui.sheet.type === "panel" ? { type: "panel", g: ui.sheet.g, t: ui.sheet.t } : null;
+      openSheet({ type: "phase", id: el.dataset.id, ph: el.dataset.ph, back });
+    },
+    "phase-back"() { const b = ui.sheet && ui.sheet.back; if (b) openSheet(b); else closeSheet(); },
+    "phase-edit"() { ui.sheet.edit = !ui.sheet.edit; ui.sheet.f = {}; ui.sheet.err = ""; renderSheet(); },
+    "phase-start"(el) { phaseSet(el.dataset.ph, (ph) => { ph.startedOn = today(); return "started"; }); },
+    "phase-finish"(el) { phaseSet(el.dataset.ph, (ph) => { ph.done = true; ph.doneOn = today(); if (!ph.startedOn) ph.startedOn = today(); return "finished"; }); },
+    "phase-reopen"(el) { phaseSet(el.dataset.ph, (ph) => { ph.done = false; ph.doneOn = null; return "not finished after all"; }); },
+    "phase-save"(el) {
+      const s = ui.sheet, f = F(), p = project(s.id), ph = p.phases.find((x) => x.id === el.dataset.ph);
+      const g = (k) => (f[k] !== undefined ? f[k] : ph[k]) || null;
+      const ps = g("planStart"), pe = g("planEnd"), st = g("startedOn"), dn = g("doneOn");
+      if (!ps || !pe) return fail("Planned start and finish are needed.");
+      if (pe < ps) return fail("The planned finish is before the planned start.");
+      if (dn && !st) return fail("Add when it actually started.");
+      if (st && dn && dn < st) return fail("It cannot finish before it started.");
+      if (st && st > today()) return fail("“Actually started” cannot be in the future.");
+      if (dn && dn > today()) return fail("“Actually finished” cannot be in the future.");
+      const snap = JSON.stringify({ projects: S.projects });
+      const move = diffDays(ph.planEnd, pe), shift = val("shift", "Yes, move them") === "Yes, move them";
+      const later = p.phases.slice(p.phases.indexOf(ph) + 1);
+      ph.planStart = ps; ph.planEnd = pe; ph.startedOn = st; ph.doneOn = dn; ph.done = !!dn;
+      if (move && shift) later.forEach((x) => { x.planStart = addDays(x.planStart, move); x.planEnd = addDays(x.planEnd, move); });
+      const e = log("phase", { projectId: p.id, value: "changed the dates of “" + esc(ph.name) + "” (" + esc(p.name) + "): planned " + fmtShort(ps) + " – " + fmtShort(pe) + (st ? ", started " + fmtShort(st) : "") + (dn ? ", finished " + fmtShort(dn) : "") + (move && shift && later.length ? "; later phases moved " + daysTxt(Math.abs(move)) + (move > 0 ? " later" : " earlier") : "") });
+      s.edit = false; s.f = {};
+      done("Dates saved.", snap, [e]); renderSheet();
+    },
     tick(el) {
       const p = project(el.dataset.id), ph = p && p.phases.find((x) => x.id === el.dataset.ph); if (!ph) return;
       ph.done = !ph.done; ph.doneOn = ph.done ? today() : null;
+      if (ph.done && !ph.startedOn) ph.startedOn = today();
+      log("phase", { projectId: p.id, value: "marked “" + esc(ph.name) + "” " + (ph.done ? "as finished" : "as not finished") + " (" + esc(p.name) + ")" });
       save(); render(); toast(ph.done ? "“" + esc(ph.name) + "” marked done. Project is " + Math.round(progress(p) * 100) + "% done." : "“" + esc(ph.name) + "” marked not done.");
     },
     "open-delay"(el) { if (!S.projects.length) return toast("Add a project first.", "alert"); openSheet({ type: "delay", id: el && el.dataset.id }); },
@@ -2512,7 +2682,7 @@
       const colors = ["#0F7F82", "#3563C4", "#7A5CC9", "#4F8F5B", "#B9832F", "#C0587E", "#2B7A9E"];
       const id = uid("p");
       S.projects.push({ id, name: f.name.trim(), client: f.client || "", location: f.location || "", type: (f.type || "Factory").toLowerCase(), start, end, originalEnd: end, value: parseFloat(f.value) || 0,
-        phases: ["Site clearing & piling", "Foundation & ground slab", "Steel structure", "Roofing & wall cladding", "M&E (electrical, plumbing, fire)", "Finishing & handover"].map((n, i) => ({ id: id + "-ph" + i, name: n, done: false, doneOn: null })),
+        phases: ["Site clearing & piling", "Foundation & ground slab", "Steel structure", "Roofing & wall cladding", "M&E (electrical, plumbing, fire)", "Finishing & handover"].map((n, i) => ({ id: id + "-ph" + i, name: n, done: false, doneOn: null })), phasePlanV: 1,
         delays: [], color: colors[S.projects.length % colors.length] });
       if (!S.people.site.siteId) S.people.site.siteId = id;
       save(); closeSheet(); location.hash = "#/project/" + id; toast("Project created.");

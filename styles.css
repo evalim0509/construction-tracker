@@ -839,6 +839,57 @@ button.back { border: 0; background: none; padding: 0; cursor: pointer; font: in
 .cm-line i { height: 4px; opacity: .9; }
 .cm-line:hover i { height: 6px; }
 
+/* project phase timeline (above the project calendar) */
+.ptl { border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px 10px; margin: 0 0 14px; background: var(--card); }
+.ptl-sum { font-size: 14.5px; margin-bottom: 10px; color: var(--ink-2); }
+.ptl-sum b { color: var(--ink); font-weight: 600; }
+.ptl-sum .warn { color: #9A5B13; font-weight: 500; }
+.ptl-sum .ok { color: #2E7D4F; font-weight: 500; }
+.ptl-head, .ptl-row { display: grid; grid-template-columns: 200px 1fr; gap: 14px; align-items: center; }
+.ptl-row { width: 100%; border: 0; background: none; padding: 6px 4px; margin: 0 -4px; border-radius: 6px; text-align: left; font: inherit; color: inherit; box-sizing: content-box; }
+button.ptl-row { cursor: pointer; }
+button.ptl-row:hover { background: var(--bg); }
+.ptl-row + .ptl-row { border-top: 1px solid var(--line); border-radius: 0; }
+.ptl-name { display: flex; flex-direction: column; min-width: 0; }
+.ptl-name b { font-weight: 500; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ptl-name small { font-size: 12.5px; color: var(--muted); }
+.ptl-name small.warn { color: #9A5B13; }
+.ptl-name small.good { color: #2E7D4F; }
+.ptl-name small.info { color: var(--teal); }
+.ptl-track { position: relative; height: 24px; }
+.ptl-track i { position: absolute; height: 6px; border-radius: 3px; }
+.ptl-track i.pl { top: 3px; background: #D3DAE0; }
+.ptl-track i.ac { top: 13px; background: var(--pc, var(--teal)); }
+.ptl-track i.ac.ok { background: #2E8B57; }
+.ptl-track i.ac.late { background: #D08A2E; }
+.ptl-track i.cut-l { border-top-left-radius: 0; border-bottom-left-radius: 0; }
+.ptl-track i.cut-r { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.ptl-go { position: absolute; top: 12px; width: 0; height: 0; border-left: 6px solid var(--ink-2); border-top: 4px solid transparent; border-bottom: 4px solid transparent; margin-left: 2px; }
+.ptl-tick { position: absolute; top: 9px; margin-left: 3px; color: #2E8B57; line-height: 0; }
+.ptl-tick.late { color: #D08A2E; }
+.ptl-tick svg { width: 13px; height: 13px; stroke-width: 3; }
+.ptl-today { position: absolute; top: -2px; bottom: -2px; width: 0; border-left: 1.5px solid var(--ink); opacity: .55; }
+.ptl-ticks { height: 16px; font-size: 11.5px; color: var(--muted); }
+.ptl-ticks span { position: absolute; top: 0; transform: translateX(-1px); }
+.ptl-ticks .ptl-today { top: 14px; bottom: auto; height: 6px; opacity: .9; }
+.ptl-foot { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 10px; font-size: 12.5px; color: var(--ink-2); }
+.ptl-foot span { display: inline-flex; align-items: center; gap: 6px; }
+.ptl-foot .k { width: 16px; height: 6px; border-radius: 3px; display: inline-block; }
+.ptl-foot .k.pl { background: #D3DAE0; } .ptl-foot .k.ac { background: var(--pc, var(--teal)); } .ptl-foot .k.late { background: #D08A2E; } .ptl-foot .k.ok { background: #2E8B57; }
+.ptl-none { padding: 4px 0; }
+.ph-facts { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 4px 0 14px; }
+.ph-facts > div { border: 1px solid var(--line); border-radius: 8px; padding: 12px; display: flex; flex-direction: column; gap: 4px; }
+.ph-facts b { font-weight: 500; font-size: 15.5px; }
+.ph-facts small { font-size: 13px; color: var(--muted); }
+@media (max-width: 760px) {
+  .ptl { padding: 12px 12px 10px; }
+  .ptl-head, .ptl-row { grid-template-columns: 1fr; gap: 4px; }
+  .ptl-head .ptl-name { display: none; }
+  .ptl-name { flex-direction: row; justify-content: space-between; align-items: baseline; gap: 10px; }
+  .ptl-name small { flex: none; }
+  .ph-facts { grid-template-columns: 1fr; }
+}
+
 /* automatic face check */
 .face-line { display: flex; align-items: flex-start; justify-content: center; gap: 8px; margin: 12px auto 0; max-width: 420px; font-size: 15px; line-height: 1.4; color: var(--muted); text-align: left; }
 .face-line svg { width: 18px; height: 18px; flex: none; margin-top: 1px; }
