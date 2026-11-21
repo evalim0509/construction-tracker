@@ -183,7 +183,7 @@ one are clocked in by the site manager with a photo, as before.
 ## 7. How it works (technical)
 
 - **No build step.** `index.html` loads `styles.css`, `three.min.js` (3D library, MIT, bundled locally), `factory3d.js`, `sample-data.js` and `app.js`.
-- **Updates reach phones straight away:** `index.html` links every file with a version number (`app.js?v=0.6.6`). Bump it on each release so browsers don't keep showing an old cached copy (GitHub Pages lets browsers cache files for 10 minutes).
+- **Updates reach phones straight away:** `index.html` links every file with a version number (`app.js?v=0.6.7`). Bump it on each release so browsers don't keep showing an old cached copy (GitHub Pages lets browsers cache files for 10 minutes).
 - **Data:** everything except photos is one JSON object in `localStorage` (`sitebook-data-v1`). Photos are compressed to ~720px JPEG and kept in **IndexedDB** (`sitebook-photos`).
 - **Screens** are functions returning HTML; clicks are handled in one place through `data-action` attributes.
 - **3D buildings** (`factory3d.js`): each project gets its own randomly generated factory (sawtooth roof, silos) or warehouse (gable roof, loading docks), seeded by the project id. The model shows progress: steel frame → walls going up (teal) → finished, with a tower crane until 92%. One shared WebGL view plus one for still thumbnails. Falls back to a line drawing if WebGL is not available.
@@ -248,6 +248,16 @@ Site manager only worker has no phone                             → neutral, n
 11. **e-Invoicing (LHDN MyInvois)** is being phased in. Accountants will ask for supplier TIN and e-invoice numbers. Plan fields for it before production.
 
 ## 9. Change log
+
+### v0.6.7 — 21 Nov 2026 — phone swipe driven by the app: steady, one month at a time, slower glide
+Client feedback: "still shaky on my phone, make it smoother and slower, it's swiping too fast."
+- **Cause:** on phones the browser's own scrolling moved the months while the app resized them a frame later, so they jittered; native momentum also flung past months quickly.
+- **The app now drives the swipe on phones** (laptops keep native trackpad scrolling and mouse drag):
+  - the months follow the finger exactly, moved with GPU transforms only (nothing is re-laid out mid-swipe);
+  - one swipe moves **one month at most**, however hard the flick; a short drag (under ~18% of the width, and slow) springs back;
+  - on release the month **glides into place over ~0.56s** with a soft ease-out; the ‹ › and Today buttons glide over ~0.6s with an ease-in-out;
+  - gentle resistance past the first and last month; vertical swipes on the calendar still scroll the page; taps on a day still open it.
+- The calendar height still fits the month in view, changing only when a swipe starts and when it settles.
 
 ### v0.6.6 — 21 Nov 2026 — smooth phone swiping again
 Client feedback: "now the swiping animation is shaky, make it smooth like previously."

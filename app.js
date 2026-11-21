@@ -891,23 +891,32 @@
   }
 
   /* Carousel: the month in focus sits in the middle at full size; neighbours shrink and peek in from the sides.
-     The size follows the swipe continuously. Touch and trackpads scroll natively; a mouse can drag. */
-  const car = { el: null, drag: null, raf: 0 };
+     Laptops: trackpads scroll natively and a mouse can drag.
+     Phones: the swipe is driven here instead of by the browser's own scrolling, so it is steady:
+     the months follow the finger exactly (moved with GPU transforms, nothing is re-laid out),
+     one swipe moves one month at most, and the month glides into place with a slow ease. */
+  const car = { el: null, drag: null, raf: 0, x: 0, pos: [], w: 1, anim: 0, touch: null };
   const centerLeft = (c) => c.offsetLeft - car.el.offsetLeft - (car.el.clientWidth - c.offsetWidth) / 2;
-  function carNearest(x) {
-    const cards = Array.from(car.el.children);
-    let best = cards[0];
-    cards.forEach((c) => { if (Math.abs(centerLeft(c) - x) < Math.abs(centerLeft(best) - x)) best = c; });
-    return best;
+  const carCards = () => Array.from(car.el.children);
+  const carPos = () => (isPhone() ? car.x : car.el.scrollLeft);
+  function carMeasure() {
+    car.pos = carCards().map(centerLeft);
+    car.w = car.el.children[0] ? car.el.children[0].offsetWidth : 1;
   }
+  function carIndex(x) {
+    let b = 0;
+    car.pos.forEach((p, i) => { if (Math.abs(p - x) < Math.abs(car.pos[b] - x)) b = i; });
+    return b;
+  }
+  function carNearest(x) { if (!car.pos.length) carMeasure(); return carCards()[carIndex(x)]; }
   function carPaint() {
     car.raf = 0;
     if (!car.el || !car.el.isConnected) return;
-    const mid = car.el.scrollLeft + car.el.clientWidth / 2;
-    Array.from(car.el.children).forEach((c) => {
-      const cMid = c.offsetLeft - car.el.offsetLeft + c.offsetWidth / 2;
-      const t = Math.min(1, Math.abs(cMid - mid) / c.offsetWidth);   // 0 = in focus, 1 = one card away
-      c.style.transform = "scale(" + (1 - 0.2 * t).toFixed(3) + ")";
+    if (!car.pos.length) carMeasure();
+    const phone = isPhone(), x = carPos(), move = phone ? "translate3d(" + (-x).toFixed(1) + "px,0,0) " : "";
+    carCards().forEach((c, i) => {
+      const t = Math.min(1, Math.abs(car.pos[i] - x) / car.w);   // 0 = in focus, 1 = one card away
+      c.style.transform = move + "scale(" + (1 - 0.2 * t).toFixed(3) + ")";
       c.style.opacity = (1 - 0.25 * t).toFixed(3);
       c.classList.toggle("focus", t < 0.5);
     });
@@ -915,62 +924,131 @@
     document.querySelectorAll(".car-dots i").forEach((d) => d.classList.toggle("on", !!f && d.dataset.ym === f.dataset.ym));
   }
   /* phones: the calendar is as tall as the month in view, so short months sit up under the header.
-     The height never changes frame by frame (that made swiping shaky): it changes once when a swipe starts
-     (room for the months either side) and once when it settles (fits the new month), both eased by CSS. */
+     It changes height only when a swipe starts (room for the months either side) and when it settles
+     (fits the new month), eased by CSS, never frame by frame. */
   function carHeight(moving) {
     const el = car.el; if (!el) return;
     if (!isPhone()) { el.style.height = ""; return; }
-    const cards = Array.from(el.children);
-    const i = cards.indexOf(carNearest(el.scrollLeft));
+    const cards = carCards(), i = carIndex(carPos());
     const near = moving ? cards.slice(Math.max(0, i - 1), i + 2) : [cards[i]];
     const h = Math.max(...near.map((c) => c.offsetHeight)) + 36;
     if (el.style.height !== h + "px") el.style.height = h + "px";
   }
+  const easeOut = (p) => 1 - Math.pow(1 - p, 3);
+  const easeInOut = (p) => (p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2);
+  // phones: glide to month i
+  function carAnimTo(i, ms, ease) {
+    const el = car.el; if (!el) return;
+    cancelAnimationFrame(car.anim); car.anim = 0;
+    ui.calMonth = el.children[i].dataset.ym;
+    const from = car.x, to = car.pos[i], t0 = performance.now();
+    const finish = () => { car.anim = 0; car.x = to; carPaint(); el.classList.remove("dragging"); carHeight(false); };
+    if (Math.abs(to - from) < 0.5) { finish(); return; }
+    carHeight(true);
+    const step = (now) => {
+      const p = Math.min(1, (now - t0) / ms);
+      car.x = from + (to - from) * ease(p);
+      carPaint();
+      if (p < 1) car.anim = requestAnimationFrame(step); else finish();
+    };
+    car.anim = requestAnimationFrame(step);
+  }
   function setupCarousel() {
     const el = $("#calCar"); car.el = el; if (!el) return;
-    const start = el.querySelector('[data-ym="' + ui.calMonth + '"]');
-    if (start) el.scrollLeft = centerLeft(start);
+    cancelAnimationFrame(car.anim); car.anim = 0; car.touch = null;
+    carMeasure();
+    const i0 = Math.max(0, carCards().findIndex((c) => c.dataset.ym === ui.calMonth));
+    if (isPhone()) { el.scrollLeft = 0; car.x = car.pos[i0]; } else el.scrollLeft = car.pos[i0];
     carPaint(); carHeight(false);
-    let tmr = 0, moving = false;
+    let tmr = 0;
     el.addEventListener("scroll", () => {
+      if (isPhone()) return;
       if (!car.raf) car.raf = requestAnimationFrame(carPaint);
-      if (!moving) { moving = true; carHeight(true); }
       clearTimeout(tmr);
-      tmr = setTimeout(() => { moving = false; ui.calMonth = carNearest(el.scrollLeft).dataset.ym; carHeight(false); }, 120);
+      tmr = setTimeout(() => { ui.calMonth = carNearest(el.scrollLeft).dataset.ym; }, 120);
     }, { passive: true });
     el.addEventListener("pointerdown", (e) => {
-      if (e.pointerType !== "mouse" || e.button !== 0) return;
+      if (e.button !== 0) return;
+      if (isPhone()) {
+        cancelAnimationFrame(car.anim); car.anim = 0;
+        car.touch = { id: e.pointerId, x0: e.clientX, y0: e.clientY, from: car.x, i: carIndex(car.x), moved: false, pts: [[e.timeStamp, e.clientX]] };
+        return;
+      }
+      if (e.pointerType !== "mouse") return;
       car.drag = { x: e.clientX, left: el.scrollLeft, moved: false };
     });
     // links and text inside the carousel must not start the browser's own drag
     el.addEventListener("dragstart", (e) => e.preventDefault());
   }
+  // stop the click that follows a drag from opening a day
+  function carEatClick() {
+    const stop = (ev) => { ev.stopPropagation(); ev.preventDefault(); window.removeEventListener("click", stop, true); };
+    window.addEventListener("click", stop, true);
+    setTimeout(() => window.removeEventListener("click", stop, true), 50);
+  }
   // window listeners are added once (not on every render)
   window.addEventListener("pointermove", (e) => {
+    const t = car.touch;
+    if (t && e.pointerId === t.id && car.el) {
+      const dx = e.clientX - t.x0, dy = e.clientY - t.y0;
+      if (!t.moved) {
+        if (Math.abs(dy) > 10 && Math.abs(dy) > Math.abs(dx)) { car.touch = null; return; }   // scrolling the page
+        if (Math.abs(dx) < 8) return;
+        t.moved = true; car.el.classList.add("dragging"); hideHoverPop(); carHeight(true);
+      }
+      const lo = car.pos[0], hi = car.pos[car.pos.length - 1];
+      let x = t.from - dx;
+      if (x < lo) x = lo - (lo - x) / 3;   // gentle resistance past the first and last month
+      if (x > hi) x = hi + (x - hi) / 3;
+      car.x = x;
+      t.pts.push([e.timeStamp, e.clientX]); if (t.pts.length > 5) t.pts.shift();
+      if (!car.raf) car.raf = requestAnimationFrame(carPaint);
+      return;
+    }
     const d = car.drag; if (!d || !car.el) return;
     const dx = e.clientX - d.x;
     if (!d.moved && Math.abs(dx) > 6) { d.moved = true; car.el.classList.add("dragging"); hideHoverPop(); }
     if (d.moved) car.el.scrollLeft = d.left - dx;
   });
-  function carEndDrag() {
+  function carTouchEnd(e) {
+    const t = car.touch; if (!t || e.pointerId !== t.id) return;
+    car.touch = null;
+    if (!t.moved || !car.el) return;
+    const dx = e.clientX - t.x0;
+    const [ta, xa] = t.pts[0], [tb, xb] = t.pts[t.pts.length - 1];
+    const v = tb > ta ? (xb - xa) / (tb - ta) : 0;   // finger speed, px per ms
+    let i = t.i;
+    if (e.type === "pointercancel") i = carIndex(car.x);
+    else if (Math.abs(dx) > car.w * 0.18 || Math.abs(v) > 0.3) i += (dx || -v) < 0 ? 1 : -1;
+    i = Math.max(0, Math.min(car.pos.length - 1, i));
+    carAnimTo(i, 560, easeOut);
+    carEatClick();
+  }
+  function carEndDrag(e) {
+    if (car.touch) { carTouchEnd(e); return; }
     const d = car.drag; car.drag = null;
     if (!d || !d.moved || !car.el) return;
-    const el = car.el, card = el.children[0];
-    const aim = el.scrollLeft + (el.scrollLeft > d.left ? 0.3 : -0.3) * (card ? card.offsetWidth : 0);
+    const el = car.el;
+    const aim = el.scrollLeft + (el.scrollLeft > d.left ? 0.3 : -0.3) * car.w;
     el.scrollTo({ left: centerLeft(carNearest(aim)), behavior: "smooth" });
     setTimeout(() => el.classList.remove("dragging"), 500);   // snapping back on only after the slide
-    const stop = (ev) => { ev.stopPropagation(); ev.preventDefault(); window.removeEventListener("click", stop, true); };
-    window.addEventListener("click", stop, true);
-    setTimeout(() => window.removeEventListener("click", stop, true), 50);
+    carEatClick();
   }
   window.addEventListener("pointerup", carEndDrag);
   window.addEventListener("pointercancel", carEndDrag);
-  window.addEventListener("resize", () => { if (car.el && car.el.isConnected) { const c = car.el.querySelector('[data-ym="' + ui.calMonth + '"]'); if (c) car.el.scrollLeft = centerLeft(c); carPaint(); carHeight(false); } });
+  window.addEventListener("resize", () => {
+    if (!car.el || !car.el.isConnected) return;
+    carMeasure();
+    const i = Math.max(0, carCards().findIndex((c) => c.dataset.ym === ui.calMonth));
+    if (isPhone()) { car.el.scrollLeft = 0; car.x = car.pos[i]; } else car.el.scrollLeft = car.pos[i];
+    carPaint(); carHeight(false);
+  });
   function carGo(ym) {
     if (!car.el) return;
-    const c = car.el.querySelector('[data-ym="' + ym + '"]'); if (!c) return;
+    const cards = carCards(), i = cards.findIndex((c) => c.dataset.ym === ym); if (i < 0) return;
     ui.calMonth = ym;
-    car.el.scrollTo({ left: centerLeft(c), behavior: "smooth" });
+    if (isPhone()) { const n = Math.abs(i - carIndex(car.x)); carAnimTo(i, 600 + 80 * Math.min(4, Math.max(0, n - 1)), easeInOut); return; }
+    car.el.scrollTo({ left: car.pos[i], behavior: "smooth" });
   }
   function carStep(step) {
     const months = calMonths();
