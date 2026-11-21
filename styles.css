@@ -839,6 +839,16 @@ button.back { border: 0; background: none; padding: 0; cursor: pointer; font: in
 .cm-line i { height: 4px; opacity: .9; }
 .cm-line:hover i { height: 6px; }
 
+/* automatic face check */
+.face-line { display: flex; align-items: flex-start; justify-content: center; gap: 8px; margin: 12px auto 0; max-width: 420px; font-size: 15px; line-height: 1.4; color: var(--muted); text-align: left; }
+.face-line svg { width: 18px; height: 18px; flex: none; margin-top: 1px; }
+.face-line.good { color: #2E7D4F; }
+.face-line.bad { color: #B3261E; background: #FCEDEC; border-radius: 8px; padding: 10px 12px; }
+.face-line .spin { width: 14px; height: 14px; border: 2px solid #CBD3D9; border-top-color: var(--ink); border-radius: 50%; animation: spin .8s linear infinite; flex: none; margin-top: 3px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.report.face-alert { background: #FCEDEC; color: #8C1D18; }
+.report.face-alert > svg { color: #B3261E; }
+
 /* position dots under the calendar (phones) */
 .car-dots { display: none; }
 

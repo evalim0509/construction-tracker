@@ -183,7 +183,7 @@ one are clocked in by the site manager with a photo, as before.
 ## 7. How it works (technical)
 
 - **No build step.** `index.html` loads `styles.css`, `three.min.js` (3D library, MIT, bundled locally), `factory3d.js`, `sample-data.js` and `app.js`.
-- **Updates reach phones straight away:** `index.html` links every file with a version number (`app.js?v=0.6.7`). Bump it on each release so browsers don't keep showing an old cached copy (GitHub Pages lets browsers cache files for 10 minutes).
+- **Updates reach phones straight away:** `index.html` links every file with a version number (`app.js?v=0.7.0`). Bump it on each release so browsers don't keep showing an old cached copy (GitHub Pages lets browsers cache files for 10 minutes).
 - **Data:** everything except photos is one JSON object in `localStorage` (`sitebook-data-v1`). Photos are compressed to ~720px JPEG and kept in **IndexedDB** (`sitebook-photos`).
 - **Screens** are functions returning HTML; clicks are handled in one place through `data-action` attributes.
 - **3D buildings** (`factory3d.js`): each project gets its own randomly generated factory (sawtooth roof, silos) or warehouse (gable roof, loading docks), seeded by the project id. The model shows progress: steel frame → walls going up (teal) → finished, with a tower crane until 92%. One shared WebGL view plus one for still thumbnails. Falls back to a line drawing if WebGL is not available.
@@ -248,6 +248,18 @@ Site manager only worker has no phone                             → neutral, n
 11. **e-Invoicing (LHDN MyInvois)** is being phased in. Accountants will ask for supplier TIN and e-invoice numbers. Plan fields for it before production.
 
 ## 9. Change log
+
+### v0.7.0 — 21 Nov 2026 — automatic face check: flags a different person between clock in and clock out
+Client test: "clock in with a selfie of person A, clock out with person B — it should flag that it is a different person."
+- **How it works:** each real selfie is turned into 128 numbers describing the face (open-source **face-api**, MIT licence, by Vladimir Mandic; files `face-api.js` plus three model files at the repo root, ~8 MB in total). The clock-out face is compared with the clock-in face. Distance **over 0.5 = different person** (stricter than the library's usual 0.6, on purpose: a false alarm costs the site manager one tap, a missed impostor costs a day's pay). No face found = flagged too.
+- **Privacy and cost:** runs entirely on the phone; photos never leave the device and there is no per-check fee. The library loads only the first time a real selfie needs checking (later checks take ~2 s), so other pages stay fast. Demo (drawn) photos are never checked.
+- **Worker:** while looking at their selfie they see "Checking your face…", then a green "Face found" / "Same person as the clock-in selfie", or a red warning ("This does not look like the person who clocked in. Retake, or send it and your site manager will check" / "No face found…") in their own language (English, Malay, Indonesian, Bengali, Nepali, Burmese). They can still send it: the site manager decides.
+- **Site manager:** the worker's status becomes **Different person?** (red) or **No face in selfie** (amber), it counts as To do, a notification is sent, and the row shows a box under the two photos with **Same person** / **Looks fine** (with Undo). A matching pair shows a quiet "same person (checked automatically)" line. Approve-all skips flagged days.
+- **History:** the check is logged as "SiteBook (automatic face check)", and the site manager's "Same person" is logged too.
+- If the worker saves before the check finishes (or closes the app), the check finishes in the background, and any unchecked selfies are checked the next time the app is opened.
+- **Data:** `self.inFace` / `self.outFace` (face numbers), `face` `{ res: found|same|diff|noface, d, side, of }`, `faceOk` `{ at, by }` on the attendance record.
+- **Test:** faces cut from the library's sample photos: person A in / person B out → flagged; the same face mirrored, brighter and re-cropped → passes; a photo of a wall → "No face".
+- **Limits (be honest):** this is a strong hint, not proof. Twins, very poor light or a face half out of frame can fool it either way; a printed photo of the real worker is not detected (no liveness check yet). That is why it flags for a person to look, rather than blocking.
 
 ### v0.6.7 — 21 Nov 2026 — phone swipe driven by the app: steady, one month at a time, slower glide
 Client feedback: "still shaky on my phone, make it smoother and slower, it's swiping too fast."

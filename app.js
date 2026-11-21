@@ -189,6 +189,107 @@
     return id;
   }
 
+  /* Face check: do the clock-in and clock-out selfies show the same person?
+     Runs on the phone itself with face-api (open source, MIT); photos never leave the device.
+     The library and models (~8 MB) load only the first time a real selfie needs checking.
+     Each face becomes 128 numbers; the distance between two faces is usually under 0.5 for the
+     same person; over 0.5 is treated as a different person (strict on purpose: a false alarm costs one tap). */
+  const FACE_LIMIT = 0.5;
+  const Face = (() => {
+    let ready = null;
+    const ver = ((document.querySelector('script[src^="app.js"]') || {}).src || "").split("v=")[1] || "1";
+    function load() {
+      if (ready) return ready;
+      ready = new Promise((res, rej) => {
+        if (window.faceapi) return res();
+        const sc = document.createElement("script");
+        sc.src = "face-api.js?v=" + ver; sc.onload = res; sc.onerror = rej;
+        document.head.appendChild(sc);
+      }).then(async () => {
+        const fa = window.faceapi;
+        try { await fa.tf.setBackend("webgl"); } catch (e) { /* falls back to the CPU */ }
+        await fa.tf.ready();
+        await Promise.all([fa.nets.tinyFaceDetector.loadFromUri("."), fa.nets.faceLandmark68TinyNet.loadFromUri("."), fa.nets.faceRecognitionNet.loadFromUri(".")]);
+        return fa;
+      });
+      ready.catch(() => { ready = null; });
+      return ready;
+    }
+    // photo (data URL) -> 128 numbers, or null when no face is found
+    async function describe(src) {
+      const fa = await load();
+      const im = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = src; });
+      const det = await fa.detectSingleFace(im, new fa.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.4 })).withFaceLandmarks(true).withFaceDescriptor();
+      return det ? Array.from(det.descriptor, (v) => Math.round(v * 10000) / 10000) : null;
+    }
+    const dist = (a, b) => Math.sqrt(a.reduce((t, v, i) => t + (v - b[i]) * (v - b[i]), 0));
+    return { load, describe, dist };
+  })();
+  const realPhoto = (ref) => !!ref && !ref.startsWith("demo-");
+  async function faceOf(ref, known) {
+    if (known) return known;
+    const src = photoSync(ref) || (await PhotoDB.get(ref));
+    if (!src) return undefined;                 // photo missing: cannot check
+    return (await Face.describe(src)) || null;  // null: no face in the photo
+  }
+  // compares the two selfies of one day and stores the result on the record (r.face)
+  async function faceCheck(r) {
+    const s = r.self || {};
+    if (!realPhoto(s.inPhoto)) return false;
+    const key = s.inPhoto + "|" + (realPhoto(s.outPhoto) ? s.outPhoto : "");
+    if (r.face && r.face.of === key) return false;
+    const a = await faceOf(s.inPhoto, s.inFace);
+    const b = realPhoto(s.outPhoto) ? await faceOf(s.outPhoto, s.outFace) : null;
+    if (a === undefined || b === undefined) return false;
+    if (a) s.inFace = a;
+    if (b) s.outFace = b;
+    const before = r.face ? r.face.res : null;
+    let res, d = null, side = null;
+    if (!a) { res = "noface"; side = "in"; }
+    else if (!realPhoto(s.outPhoto)) res = "found";
+    else if (!b) { res = "noface"; side = "out"; }
+    else { d = Math.round(Face.dist(a, b) * 100) / 100; res = d > FACE_LIMIT ? "diff" : "same"; }
+    r.face = { of: key, res, d, side, at: new Date().toISOString() };
+    if ((res === "diff" || res === "noface") && res !== before) {
+      notify({ type: "face", to: "site", workerId: r.workerId, projectId: r.projectId, forDate: r.date, photo: res === "diff" ? s.outPhoto : (side === "in" ? s.inPhoto : s.outPhoto), text: res, side });
+      log("face", { workerId: r.workerId, recId: r.id, projectId: r.projectId, forDate: r.date, value: res, part: side, by: "system", byName: "SiteBook" });
+    }
+    save();
+    return true;
+  }
+  // checks any selfies not checked yet (e.g. the worker closed the app before the check finished)
+  let faceBusy = false;
+  async function faceSweep() {
+    if (faceBusy) return;
+    const todo = S.attendance.filter((r) => r.self && realPhoto(r.self.inPhoto) && (!r.face || r.face.of !== r.self.inPhoto + "|" + (realPhoto(r.self.outPhoto) ? r.self.outPhoto : "")));
+    if (!todo.length) return;
+    faceBusy = true;
+    let changed = false;
+    for (const r of todo) { try { changed = (await faceCheck(r)) || changed; } catch (e) { break; } }
+    faceBusy = false;
+    if (changed && role() !== "worker") render();
+  }
+
+  // worker's confirm step: check the new selfie while they look at it
+  async function facePreview(s, ph) {
+    const tok = (s.faceTok = (s.faceTok || 0) + 1);
+    let res = null, desc;
+    try {
+      desc = await Face.describe(ph);
+      if (!desc) res = "noface";
+      else if (s.act === "in") res = "found";
+      else {
+        const r = S.attendance.find((a) => a.workerId === me().id && a.date === today());
+        const inRef = r && r.self && r.self.inPhoto;
+        const a = realPhoto(inRef) ? await faceOf(inRef, r.self.inFace) : null;
+        if (a) { r.self.inFace = a; res = Face.dist(a, desc) > FACE_LIMIT ? "diff" : "same"; } else res = "found";
+      }
+    } catch (e) { res = null; }   // no check possible (e.g. no internet the first time): say nothing
+    if (s.faceTok !== tok || ui.sheet !== s) return;
+    s.desc = desc || undefined; s.face = res;
+    renderSheet();
+  }
+
   /* demo photos are drawn, never stored */
   function hashStr(s) { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0; return Math.abs(h); }
   function demoFace() {
@@ -344,6 +445,7 @@
       if (needIn || needOut) return { key: "rej", label: (needIn ? "Clock in" : "Clock out") + " rejected, write a time", cls: "warn", flag: true };
       return { key: "rejok", label: "Site manager time used", cls: "" };
     }
+    if (r.face && !r.faceOk && (r.face.res === "diff" || r.face.res === "noface")) return { key: "face", label: r.face.res === "diff" ? "Different person?" : "No face in selfie", cls: r.face.res === "diff" ? "bad" : "warn", flag: true };
     if (!s.in && !hasPhone(w)) return { key: "single", label: "Site manager only", cls: "" };
     if (s.in && !r.in) return { key: "worker", label: r.date === today() ? "Selfie in, waiting for you" : "Site manager did not confirm", cls: "warn", flag: true };
     if (r.in && !s.in) return { key: "manager", label: "Worker did not clock in", cls: "warn", flag: true };
@@ -387,13 +489,15 @@
       case "report": return "reported a problem with " + fmtDay(a.forDate) + ": " + v;
       case "sorted": return "marked " + w + " report" + d + " as sorted";
       case "undo": return "undid: " + v;
+      case "face": return a.value === "diff" ? "flagged " + w + " selfies" + d + ": the clock-out selfie looks like a different person from the clock-in selfie" : "flagged " + w + " clock-" + (a.part === "in" ? "in" : "out") + " selfie" + d + ": no face could be seen";
+      case "face-ok": return "checked " + w + " selfies" + d + " and marked them as the same person";
       default: return v;
     }
   }
-  const ROLE_SHORT = { boss: "management", site: "site manager", buyer: "buyer", worker: "worker" };
+  const ROLE_SHORT = { boss: "management", site: "site manager", buyer: "buyer", worker: "worker", system: "automatic face check" };
   function auditRow(a, forWorker) {
     const mine = forWorker && a.by === "worker";
-    return '<div class="au-row"><span class="au-time num">' + esc(a.time) + '</span><span class="au-ic au-' + a.by + '">' + icon(a.action === "undo" ? "undo" : a.action === "reject" ? "x" : a.action === "report" ? "flag" : a.by === "worker" ? "camera" : "check") + "</span>" +
+    return '<div class="au-row"><span class="au-time num">' + esc(a.time) + '</span><span class="au-ic au-' + a.by + '">' + icon(a.action === "undo" ? "undo" : a.action === "reject" ? "x" : a.action === "report" ? "flag" : a.action === "face" ? "alert" : a.by === "worker" ? "camera" : "check") + "</span>" +
       '<span class="au-text">' + (mine ? "<b>You</b> " : "<b>" + esc(a.byName) + '</b> <span class="muted">(' + ROLE_SHORT[a.by] + ")</span> ") + auditText(a, forWorker) + "</span></div>";
   }
   // snapshot for Undo (attendance, reports and notifications only; the history itself is never rolled back)
@@ -570,6 +674,7 @@
   }
   function after() {
     hydratePhotos();
+    setTimeout(() => faceSweep().catch(() => {}), 400);
     $$("[data-3d]").forEach((el) => {
       const p = project(el.dataset["3d"]);
       if (p) window.Factory3D.attach(el, { seed: p.id + p.name, progress: progress(p), type: p.type });
@@ -1416,6 +1521,7 @@
     const mt = matchOf(r);
     if (r.status === "rejected") return { label: "Rejected", cls: "bad" };
     if (r.status === "approved") return { label: "Approved", cls: "good" };
+    if (mt.key === "face") return { label: mt.label, cls: mt.cls };
     if (needsConfirm(r)) return { label: r.date === today() ? "Waiting for you" : "Not confirmed", cls: "warn" };
     if (mt.key === "rej") return { label: mt.label, cls: "warn" };
     if (mt.key === "diff") return { label: mt.label.replace("Times differ by", "Times differ"), cls: "warn" };
@@ -1426,6 +1532,18 @@
   }
   const isTodo = (r) => r.status === "waiting" && (needsConfirm(r) || !!matchOf(r).flag);
 
+  // what the automatic face check found, under the two selfies
+  function faceBox(r) {
+    const f = r.face; if (!f) return "";
+    if (r.faceOk) return '<div class="small muted">' + icon("check", ' style="width:14px;height:14px;vertical-align:-2px"') + " Site manager checked the selfies: same person.</div>";
+    if (f.res === "same") return '<div class="small muted">' + icon("check", ' style="width:14px;height:14px;vertical-align:-2px"') + " Clock-in and clock-out selfies show the same person (checked automatically).</div>";
+    if (f.res !== "diff" && f.res !== "noface") return "";
+    const btn = can.approve() ? '<button class="btn btn-sm" data-action="face-ok" data-id="' + r.id + '">' + (f.res === "diff" ? "Same person" : "Looks fine") + "</button>" : "";
+    const msg = f.res === "diff"
+      ? "<b>The clock-in and clock-out selfies look like different people.</b><br>Compare the two photos above. If it is someone else, reject the clock out."
+      : "<b>No face could be seen in the clock-" + (f.side === "in" ? "in" : "out") + " selfie.</b><br>Check the photo above.";
+    return '<div class="report face-alert">' + icon("alert") + "<div>" + msg + "</div>" + btn + "</div>";
+  }
   // compact row; tap to see the photos and Change / Reject
   function attRow(r) {
     const w = worker(r.workerId); if (!w) return "";
@@ -1445,6 +1563,7 @@
     const body =
       '<div class="ct ct-solo"><div class="ct-row ct-head"><span>Clock in</span><span>Clock out</span></div><div class="ct-row">' + timeCell(r, "in", true) + timeCell(r, "out", true) + "</div></div>" +
       (done && h ? '<div class="small">Duration ' + durLine(r) + (r.mgrReason ? ' <span class="muted">Site manager: “' + esc(r.mgrReason) + "”</span>" : "") + (can.seePay() && r.status !== "rejected" ? ' <span class="muted">Pay ' + RM(Math.round(payFor(r))) + "</span>" : "") + "</div>" : "") +
+      faceBox(r) +
       (dsp ? '<div class="report">' + icon("flag") + "<div><b>" + esc(w.name.split(" ")[0]) + " says: " + esc(dsp.reason) + "</b>" + (dsp.note ? "<br>“" + esc(dsp.note) + "”" : "") + "</div>" + (can.approve() ? '<button class="btn btn-sm" data-action="dispute-done" data-id="' + dsp.id + '">Sorted</button>' : "") + "</div>" : "") +
       (r.status === "rejected" && r.rejectReason ? '<div class="report">' + icon("x") + "<div><b>Whole day rejected:</b> " + esc(r.rejectReason) + "</div></div>" : "") +
       (r.note ? '<div class="small muted">' + esc(r.note) + "</div>" : "") +
@@ -1597,12 +1716,12 @@
   // Worker screen words. Everything except English is a DRAFT: a native speaker must check it before real use.
   const LANGS = { en: "English", ms: "Bahasa Malaysia", bn: "বাংলা (Bengali)", ne: "नेपाली (Nepali)", id: "Bahasa Indonesia", my: "မြန်မာ (Burmese)" };
   const T = {
-    en: { myHistory: "My history", myHistorySub: "Everything done to your days", today: "Today", notYet: "Not yet", hi: "Hi", clockIn: "Clock in", clockOut: "Clock out", inSince: "In since", doneToday: "Done for today", confirmed: "Site manager confirmed", waitingConfirm: "Waiting for site manager to confirm", tomorrow: "Tomorrow", restDay: "Rest day", noJob: "Not booked yet", myPay: "My pay this month", days: "days", ot: "OT", checked: "checked", waiting: "waiting", dayRate: "Day rate", otRate: "OT per hour", payDay: "Pay day", myDays: "My days", wrong: "Something wrong? Tell site manager", takePhoto: "Take a selfie", confirm: "Confirm", retake: "Retake", onSite: "You are at the site", notOnSite: "You are not at the site. Go to the site to clock in.", send: "Send", whichDay: "Which day?", whatsWrong: "What is wrong?", wrongTime: "Wrong time", missingDay: "Day missing", wrongOT: "Wrong OT", other: "Other", sent: "Sent to site manager", language: "Language", scanQR: "Scan the QR code at the site gate", scan: "Scan QR code", whoAreYou: "Who are you?", notYou: "Not you?", approved: "Checked", rejected: "Not paid", hours: "hours", note: "Tell us more (optional)", noDays: "No days yet this month." },
-    ms: { myHistory: "Sejarah saya", myHistorySub: "Semua perubahan pada hari kerja anda", today: "Hari ini", notYet: "Belum", hi: "Hai", clockIn: "Masuk kerja", clockOut: "Keluar kerja", inSince: "Masuk sejak", doneToday: "Selesai hari ini", confirmed: "Disahkan oleh pengurus tapak", waitingConfirm: "Menunggu pengesahan pengurus tapak", tomorrow: "Esok", restDay: "Hari rehat", noJob: "Belum dijadualkan", myPay: "Gaji saya bulan ini", days: "hari", ot: "OT", checked: "disahkan", waiting: "menunggu", dayRate: "Kadar harian", otRate: "OT sejam", payDay: "Hari gaji", myDays: "Hari kerja saya", wrong: "Ada masalah? Beritahu pengurus tapak", takePhoto: "Ambil swafoto", confirm: "Sahkan", retake: "Ambil semula", onSite: "Anda berada di tapak", notOnSite: "Anda tiada di tapak. Pergi ke tapak untuk masuk kerja.", send: "Hantar", whichDay: "Hari apa?", whatsWrong: "Apa masalahnya?", wrongTime: "Masa salah", missingDay: "Hari tiada", wrongOT: "OT salah", other: "Lain-lain", sent: "Dihantar kepada pengurus tapak", language: "Bahasa", scanQR: "Imbas kod QR di pintu masuk tapak", scan: "Imbas kod QR", whoAreYou: "Siapa anda?", notYou: "Bukan anda?", approved: "Disahkan", rejected: "Tidak dibayar", hours: "jam", note: "Ceritakan lagi (pilihan)", noDays: "Belum ada hari kerja bulan ini." },
-    id: { myHistory: "Riwayat saya", myHistorySub: "Semua perubahan pada hari kerja Anda", today: "Hari ini", notYet: "Belum", hi: "Halo", clockIn: "Absen masuk", clockOut: "Absen pulang", inSince: "Masuk sejak", doneToday: "Selesai hari ini", confirmed: "Dikonfirmasi manajer lapangan", waitingConfirm: "Menunggu konfirmasi manajer lapangan", tomorrow: "Besok", restDay: "Hari libur", noJob: "Belum dijadwalkan", myPay: "Gaji saya bulan ini", days: "hari", ot: "lembur", checked: "dikonfirmasi", waiting: "menunggu", dayRate: "Upah harian", otRate: "Lembur per jam", payDay: "Hari gajian", myDays: "Hari kerja saya", wrong: "Ada yang salah? Beri tahu manajer lapangan", takePhoto: "Ambil swafoto", confirm: "Konfirmasi", retake: "Ulangi", onSite: "Anda berada di lokasi", notOnSite: "Anda tidak di lokasi. Pergi ke lokasi untuk absen.", send: "Kirim", whichDay: "Hari apa?", whatsWrong: "Apa yang salah?", wrongTime: "Jam salah", missingDay: "Hari hilang", wrongOT: "Lembur salah", other: "Lainnya", sent: "Terkirim ke manajer lapangan", language: "Bahasa", scanQR: "Pindai kode QR di gerbang lokasi", scan: "Pindai kode QR", whoAreYou: "Siapa Anda?", notYou: "Bukan Anda?", approved: "Dikonfirmasi", rejected: "Tidak dibayar", hours: "jam", note: "Ceritakan lebih lanjut (opsional)", noDays: "Belum ada hari kerja bulan ini." },
-    bn: { myHistory: "আমার ইতিহাস", myHistorySub: "আপনার কাজের দিনে করা সব পরিবর্তন", today: "আজ", notYet: "এখনও না", hi: "হ্যালো", clockIn: "কাজ শুরু", clockOut: "কাজ শেষ", inSince: "শুরু হয়েছে", doneToday: "আজকের কাজ শেষ", confirmed: "সাইট ম্যানেজার নিশ্চিত করেছেন", waitingConfirm: "সাইট ম্যানেজারের নিশ্চিতকরণের অপেক্ষায়", tomorrow: "আগামীকাল", restDay: "ছুটির দিন", noJob: "এখনও ঠিক হয়নি", myPay: "এই মাসে আমার বেতন", days: "দিন", ot: "ওভারটাইম", checked: "নিশ্চিত", waiting: "অপেক্ষায়", dayRate: "দৈনিক মজুরি", otRate: "প্রতি ঘণ্টা ওভারটাইম", payDay: "বেতনের দিন", myDays: "আমার কাজের দিন", wrong: "কিছু ভুল? সাইট ম্যানেজারকে জানান", takePhoto: "সেলফি তুলুন", confirm: "নিশ্চিত করুন", retake: "আবার তুলুন", onSite: "আপনি সাইটে আছেন", notOnSite: "আপনি সাইটে নেই। কাজ শুরু করতে সাইটে যান।", send: "পাঠান", whichDay: "কোন দিন?", whatsWrong: "কী ভুল?", wrongTime: "সময় ভুল", missingDay: "দিন বাদ পড়েছে", wrongOT: "ওভারটাইম ভুল", other: "অন্যান্য", sent: "সাইট ম্যানেজারকে পাঠানো হয়েছে", language: "ভাষা", scanQR: "সাইটের গেটে QR কোড স্ক্যান করুন", scan: "QR কোড স্ক্যান করুন", whoAreYou: "আপনি কে?", notYou: "আপনি নন?", approved: "নিশ্চিত", rejected: "বেতন হবে না", hours: "ঘণ্টা", note: "আরও বলুন (ঐচ্ছিক)", noDays: "এই মাসে এখনও কোনো দিন নেই।" },
-    ne: { myHistory: "मेरो इतिहास", myHistorySub: "तपाईंका कामका दिनमा गरिएका सबै परिवर्तन", today: "आज", notYet: "अझै छैन", hi: "नमस्ते", clockIn: "काम सुरु", clockOut: "काम सकियो", inSince: "सुरु भएको", doneToday: "आजको काम सकियो", confirmed: "साइट म्यानेजरले पुष्टि गर्नुभयो", waitingConfirm: "साइट म्यानेजरको पुष्टिको पर्खाइमा", tomorrow: "भोलि", restDay: "बिदाको दिन", noJob: "अझै तय भएको छैन", myPay: "यो महिनाको मेरो तलब", days: "दिन", ot: "ओभरटाइम", checked: "पुष्टि भयो", waiting: "पर्खाइमा", dayRate: "दैनिक ज्याला", otRate: "प्रति घण्टा ओभरटाइम", payDay: "तलब आउने दिन", myDays: "मेरा कामका दिन", wrong: "केही गलत छ? साइट म्यानेजरलाई भन्नुहोस्", takePhoto: "सेल्फी खिच्नुहोस्", confirm: "पुष्टि गर्नुहोस्", retake: "फेरि खिच्नुहोस्", onSite: "तपाईं साइटमा हुनुहुन्छ", notOnSite: "तपाईं साइटमा हुनुहुन्न। काम सुरु गर्न साइटमा जानुहोस्।", send: "पठाउनुहोस्", whichDay: "कुन दिन?", whatsWrong: "के गलत छ?", wrongTime: "समय गलत", missingDay: "दिन छुट्यो", wrongOT: "ओभरटाइम गलत", other: "अन्य", sent: "साइट म्यानेजरलाई पठाइयो", language: "भाषा", scanQR: "साइटको गेटमा QR कोड स्क्यान गर्नुहोस्", scan: "QR कोड स्क्यान गर्नुहोस्", whoAreYou: "तपाईं को हो?", notYou: "तपाईं होइन?", approved: "पुष्टि भयो", rejected: "तलब हुँदैन", hours: "घण्टा", note: "थप भन्नुहोस् (ऐच्छिक)", noDays: "यो महिना अझै कुनै दिन छैन।" },
-    my: { myHistory: "ကျွန်ုပ်၏ မှတ်တမ်း", myHistorySub: "သင့်အလုပ်ရက်များအတွက် ပြောင်းလဲမှုအားလုံး", today: "ဒီနေ့", notYet: "မရှိသေး", hi: "မင်္ဂလာပါ", clockIn: "အလုပ်ဝင်", clockOut: "အလုပ်ဆင်း", inSince: "ဝင်ချိန်", doneToday: "ဒီနေ့ အလုပ်ပြီးပါပြီ", confirmed: "ဆိုက်မန်နေဂျာ အတည်ပြုပြီး", waitingConfirm: "ဆိုက်မန်နေဂျာ အတည်ပြုရန် စောင့်နေသည်", tomorrow: "မနက်ဖြန်", restDay: "အနားယူရက်", noJob: "မသတ်မှတ်ရသေး", myPay: "ဒီလ ကျွန်ုပ်၏ လစာ", days: "ရက်", ot: "အချိန်ပို", checked: "အတည်ပြုပြီး", waiting: "စောင့်ဆိုင်းဆဲ", dayRate: "နေ့စား လုပ်ခ", otRate: "တစ်နာရီ အချိန်ပိုခ", payDay: "လစာထုတ်ရက်", myDays: "ကျွန်ုပ်၏ အလုပ်ရက်များ", wrong: "မှားနေလား? ဆိုက်မန်နေဂျာကို ပြောပါ", takePhoto: "ဆယ်လ်ဖီ ရိုက်ပါ", confirm: "အတည်ပြုပါ", retake: "ပြန်ရိုက်ပါ", onSite: "သင် ဆိုက်တွင် ရှိနေသည်", notOnSite: "သင် ဆိုက်တွင် မရှိပါ။ အလုပ်ဝင်ရန် ဆိုက်သို့ သွားပါ။", send: "ပို့ပါ", whichDay: "ဘယ်နေ့လဲ?", whatsWrong: "ဘာမှားနေလဲ?", wrongTime: "အချိန် မှားသည်", missingDay: "ရက် ကျန်နေသည်", wrongOT: "အချိန်ပို မှားသည်", other: "အခြား", sent: "ဆိုက်မန်နေဂျာထံ ပို့ပြီးပါပြီ", language: "ဘာသာစကား", scanQR: "ဆိုက်ဂိတ်ရှိ QR ကုဒ်ကို စကင်ဖတ်ပါ", scan: "QR ကုဒ် စကင်ဖတ်ပါ", whoAreYou: "သင် ဘယ်သူလဲ?", notYou: "သင် မဟုတ်ဘူးလား?", approved: "အတည်ပြုပြီး", rejected: "လစာ မရ", hours: "နာရီ", note: "ထပ်ပြောပါ (မဖြစ်မနေမဟုတ်)", noDays: "ဒီလ အလုပ်ရက် မရှိသေးပါ။" }
+    en: { faceChecking: "Checking your face…", faceFound: "Face found", faceSame: "Same person as the clock-in selfie", faceDiff: "This does not look like the person who clocked in. Retake the selfie, or send it and your site manager will check.", faceNone: "No face found. Hold the phone in front of your face and retake.", myHistory: "My history", myHistorySub: "Everything done to your days", today: "Today", notYet: "Not yet", hi: "Hi", clockIn: "Clock in", clockOut: "Clock out", inSince: "In since", doneToday: "Done for today", confirmed: "Site manager confirmed", waitingConfirm: "Waiting for site manager to confirm", tomorrow: "Tomorrow", restDay: "Rest day", noJob: "Not booked yet", myPay: "My pay this month", days: "days", ot: "OT", checked: "checked", waiting: "waiting", dayRate: "Day rate", otRate: "OT per hour", payDay: "Pay day", myDays: "My days", wrong: "Something wrong? Tell site manager", takePhoto: "Take a selfie", confirm: "Confirm", retake: "Retake", onSite: "You are at the site", notOnSite: "You are not at the site. Go to the site to clock in.", send: "Send", whichDay: "Which day?", whatsWrong: "What is wrong?", wrongTime: "Wrong time", missingDay: "Day missing", wrongOT: "Wrong OT", other: "Other", sent: "Sent to site manager", language: "Language", scanQR: "Scan the QR code at the site gate", scan: "Scan QR code", whoAreYou: "Who are you?", notYou: "Not you?", approved: "Checked", rejected: "Not paid", hours: "hours", note: "Tell us more (optional)", noDays: "No days yet this month." },
+    ms: { faceChecking: "Menyemak wajah anda…", faceFound: "Wajah dikesan", faceSame: "Orang yang sama seperti swafoto masuk kerja", faceDiff: "Ini tidak kelihatan seperti orang yang masuk kerja tadi. Ambil semula swafoto, atau hantar dan pengurus tapak akan menyemak.", faceNone: "Tiada wajah dikesan. Pegang telefon di hadapan muka anda dan ambil semula.", myHistory: "Sejarah saya", myHistorySub: "Semua perubahan pada hari kerja anda", today: "Hari ini", notYet: "Belum", hi: "Hai", clockIn: "Masuk kerja", clockOut: "Keluar kerja", inSince: "Masuk sejak", doneToday: "Selesai hari ini", confirmed: "Disahkan oleh pengurus tapak", waitingConfirm: "Menunggu pengesahan pengurus tapak", tomorrow: "Esok", restDay: "Hari rehat", noJob: "Belum dijadualkan", myPay: "Gaji saya bulan ini", days: "hari", ot: "OT", checked: "disahkan", waiting: "menunggu", dayRate: "Kadar harian", otRate: "OT sejam", payDay: "Hari gaji", myDays: "Hari kerja saya", wrong: "Ada masalah? Beritahu pengurus tapak", takePhoto: "Ambil swafoto", confirm: "Sahkan", retake: "Ambil semula", onSite: "Anda berada di tapak", notOnSite: "Anda tiada di tapak. Pergi ke tapak untuk masuk kerja.", send: "Hantar", whichDay: "Hari apa?", whatsWrong: "Apa masalahnya?", wrongTime: "Masa salah", missingDay: "Hari tiada", wrongOT: "OT salah", other: "Lain-lain", sent: "Dihantar kepada pengurus tapak", language: "Bahasa", scanQR: "Imbas kod QR di pintu masuk tapak", scan: "Imbas kod QR", whoAreYou: "Siapa anda?", notYou: "Bukan anda?", approved: "Disahkan", rejected: "Tidak dibayar", hours: "jam", note: "Ceritakan lagi (pilihan)", noDays: "Belum ada hari kerja bulan ini." },
+    id: { faceChecking: "Memeriksa wajah Anda…", faceFound: "Wajah terdeteksi", faceSame: "Orang yang sama seperti swafoto absen masuk", faceDiff: "Ini tidak terlihat seperti orang yang absen masuk. Ulangi swafoto, atau kirim dan manajer lapangan akan memeriksa.", faceNone: "Wajah tidak terdeteksi. Pegang ponsel di depan wajah Anda dan ulangi.", myHistory: "Riwayat saya", myHistorySub: "Semua perubahan pada hari kerja Anda", today: "Hari ini", notYet: "Belum", hi: "Halo", clockIn: "Absen masuk", clockOut: "Absen pulang", inSince: "Masuk sejak", doneToday: "Selesai hari ini", confirmed: "Dikonfirmasi manajer lapangan", waitingConfirm: "Menunggu konfirmasi manajer lapangan", tomorrow: "Besok", restDay: "Hari libur", noJob: "Belum dijadwalkan", myPay: "Gaji saya bulan ini", days: "hari", ot: "lembur", checked: "dikonfirmasi", waiting: "menunggu", dayRate: "Upah harian", otRate: "Lembur per jam", payDay: "Hari gajian", myDays: "Hari kerja saya", wrong: "Ada yang salah? Beri tahu manajer lapangan", takePhoto: "Ambil swafoto", confirm: "Konfirmasi", retake: "Ulangi", onSite: "Anda berada di lokasi", notOnSite: "Anda tidak di lokasi. Pergi ke lokasi untuk absen.", send: "Kirim", whichDay: "Hari apa?", whatsWrong: "Apa yang salah?", wrongTime: "Jam salah", missingDay: "Hari hilang", wrongOT: "Lembur salah", other: "Lainnya", sent: "Terkirim ke manajer lapangan", language: "Bahasa", scanQR: "Pindai kode QR di gerbang lokasi", scan: "Pindai kode QR", whoAreYou: "Siapa Anda?", notYou: "Bukan Anda?", approved: "Dikonfirmasi", rejected: "Tidak dibayar", hours: "jam", note: "Ceritakan lebih lanjut (opsional)", noDays: "Belum ada hari kerja bulan ini." },
+    bn: { faceChecking: "আপনার মুখ পরীক্ষা করা হচ্ছে…", faceFound: "মুখ পাওয়া গেছে", faceSame: "কাজ শুরুর সেলফির একই ব্যক্তি", faceDiff: "এটি কাজ শুরু করা ব্যক্তির মতো দেখাচ্ছে না। আবার সেলফি তুলুন, অথবা পাঠান, সাইট ম্যানেজার দেখবেন।", faceNone: "কোনো মুখ পাওয়া যায়নি। ফোনটি মুখের সামনে ধরে আবার তুলুন।", myHistory: "আমার ইতিহাস", myHistorySub: "আপনার কাজের দিনে করা সব পরিবর্তন", today: "আজ", notYet: "এখনও না", hi: "হ্যালো", clockIn: "কাজ শুরু", clockOut: "কাজ শেষ", inSince: "শুরু হয়েছে", doneToday: "আজকের কাজ শেষ", confirmed: "সাইট ম্যানেজার নিশ্চিত করেছেন", waitingConfirm: "সাইট ম্যানেজারের নিশ্চিতকরণের অপেক্ষায়", tomorrow: "আগামীকাল", restDay: "ছুটির দিন", noJob: "এখনও ঠিক হয়নি", myPay: "এই মাসে আমার বেতন", days: "দিন", ot: "ওভারটাইম", checked: "নিশ্চিত", waiting: "অপেক্ষায়", dayRate: "দৈনিক মজুরি", otRate: "প্রতি ঘণ্টা ওভারটাইম", payDay: "বেতনের দিন", myDays: "আমার কাজের দিন", wrong: "কিছু ভুল? সাইট ম্যানেজারকে জানান", takePhoto: "সেলফি তুলুন", confirm: "নিশ্চিত করুন", retake: "আবার তুলুন", onSite: "আপনি সাইটে আছেন", notOnSite: "আপনি সাইটে নেই। কাজ শুরু করতে সাইটে যান।", send: "পাঠান", whichDay: "কোন দিন?", whatsWrong: "কী ভুল?", wrongTime: "সময় ভুল", missingDay: "দিন বাদ পড়েছে", wrongOT: "ওভারটাইম ভুল", other: "অন্যান্য", sent: "সাইট ম্যানেজারকে পাঠানো হয়েছে", language: "ভাষা", scanQR: "সাইটের গেটে QR কোড স্ক্যান করুন", scan: "QR কোড স্ক্যান করুন", whoAreYou: "আপনি কে?", notYou: "আপনি নন?", approved: "নিশ্চিত", rejected: "বেতন হবে না", hours: "ঘণ্টা", note: "আরও বলুন (ঐচ্ছিক)", noDays: "এই মাসে এখনও কোনো দিন নেই।" },
+    ne: { faceChecking: "तपाईंको अनुहार जाँच गर्दै…", faceFound: "अनुहार भेटियो", faceSame: "काम सुरु गर्दाको सेल्फीकै व्यक्ति", faceDiff: "यो काम सुरु गर्ने व्यक्ति जस्तो देखिँदैन। फेरि सेल्फी खिच्नुहोस्, वा पठाउनुहोस्, साइट म्यानेजरले जाँच गर्नुहुनेछ।", faceNone: "अनुहार भेटिएन। फोन अनुहारको अगाडि राखेर फेरि खिच्नुहोस्।", myHistory: "मेरो इतिहास", myHistorySub: "तपाईंका कामका दिनमा गरिएका सबै परिवर्तन", today: "आज", notYet: "अझै छैन", hi: "नमस्ते", clockIn: "काम सुरु", clockOut: "काम सकियो", inSince: "सुरु भएको", doneToday: "आजको काम सकियो", confirmed: "साइट म्यानेजरले पुष्टि गर्नुभयो", waitingConfirm: "साइट म्यानेजरको पुष्टिको पर्खाइमा", tomorrow: "भोलि", restDay: "बिदाको दिन", noJob: "अझै तय भएको छैन", myPay: "यो महिनाको मेरो तलब", days: "दिन", ot: "ओभरटाइम", checked: "पुष्टि भयो", waiting: "पर्खाइमा", dayRate: "दैनिक ज्याला", otRate: "प्रति घण्टा ओभरटाइम", payDay: "तलब आउने दिन", myDays: "मेरा कामका दिन", wrong: "केही गलत छ? साइट म्यानेजरलाई भन्नुहोस्", takePhoto: "सेल्फी खिच्नुहोस्", confirm: "पुष्टि गर्नुहोस्", retake: "फेरि खिच्नुहोस्", onSite: "तपाईं साइटमा हुनुहुन्छ", notOnSite: "तपाईं साइटमा हुनुहुन्न। काम सुरु गर्न साइटमा जानुहोस्।", send: "पठाउनुहोस्", whichDay: "कुन दिन?", whatsWrong: "के गलत छ?", wrongTime: "समय गलत", missingDay: "दिन छुट्यो", wrongOT: "ओभरटाइम गलत", other: "अन्य", sent: "साइट म्यानेजरलाई पठाइयो", language: "भाषा", scanQR: "साइटको गेटमा QR कोड स्क्यान गर्नुहोस्", scan: "QR कोड स्क्यान गर्नुहोस्", whoAreYou: "तपाईं को हो?", notYou: "तपाईं होइन?", approved: "पुष्टि भयो", rejected: "तलब हुँदैन", hours: "घण्टा", note: "थप भन्नुहोस् (ऐच्छिक)", noDays: "यो महिना अझै कुनै दिन छैन।" },
+    my: { faceChecking: "သင့်မျက်နှာကို စစ်ဆေးနေသည်…", faceFound: "မျက်နှာ တွေ့ရှိသည်", faceSame: "အလုပ်ဝင် ဆယ်လ်ဖီထဲက လူနှင့် တူညီသည်", faceDiff: "ဤသူသည် အလုပ်ဝင်ခဲ့သူနှင့် မတူပါ။ ဆယ်လ်ဖီ ပြန်ရိုက်ပါ သို့မဟုတ် ပို့ပါ၊ ဆိုက်မန်နေဂျာက စစ်ဆေးပါမည်။", faceNone: "မျက်နှာ မတွေ့ပါ။ ဖုန်းကို မျက်နှာရှေ့တွင် ကိုင်ပြီး ပြန်ရိုက်ပါ။", myHistory: "ကျွန်ုပ်၏ မှတ်တမ်း", myHistorySub: "သင့်အလုပ်ရက်များအတွက် ပြောင်းလဲမှုအားလုံး", today: "ဒီနေ့", notYet: "မရှိသေး", hi: "မင်္ဂလာပါ", clockIn: "အလုပ်ဝင်", clockOut: "အလုပ်ဆင်း", inSince: "ဝင်ချိန်", doneToday: "ဒီနေ့ အလုပ်ပြီးပါပြီ", confirmed: "ဆိုက်မန်နေဂျာ အတည်ပြုပြီး", waitingConfirm: "ဆိုက်မန်နေဂျာ အတည်ပြုရန် စောင့်နေသည်", tomorrow: "မနက်ဖြန်", restDay: "အနားယူရက်", noJob: "မသတ်မှတ်ရသေး", myPay: "ဒီလ ကျွန်ုပ်၏ လစာ", days: "ရက်", ot: "အချိန်ပို", checked: "အတည်ပြုပြီး", waiting: "စောင့်ဆိုင်းဆဲ", dayRate: "နေ့စား လုပ်ခ", otRate: "တစ်နာရီ အချိန်ပိုခ", payDay: "လစာထုတ်ရက်", myDays: "ကျွန်ုပ်၏ အလုပ်ရက်များ", wrong: "မှားနေလား? ဆိုက်မန်နေဂျာကို ပြောပါ", takePhoto: "ဆယ်လ်ဖီ ရိုက်ပါ", confirm: "အတည်ပြုပါ", retake: "ပြန်ရိုက်ပါ", onSite: "သင် ဆိုက်တွင် ရှိနေသည်", notOnSite: "သင် ဆိုက်တွင် မရှိပါ။ အလုပ်ဝင်ရန် ဆိုက်သို့ သွားပါ။", send: "ပို့ပါ", whichDay: "ဘယ်နေ့လဲ?", whatsWrong: "ဘာမှားနေလဲ?", wrongTime: "အချိန် မှားသည်", missingDay: "ရက် ကျန်နေသည်", wrongOT: "အချိန်ပို မှားသည်", other: "အခြား", sent: "ဆိုက်မန်နေဂျာထံ ပို့ပြီးပါပြီ", language: "ဘာသာစကား", scanQR: "ဆိုက်ဂိတ်ရှိ QR ကုဒ်ကို စကင်ဖတ်ပါ", scan: "QR ကုဒ် စကင်ဖတ်ပါ", whoAreYou: "သင် ဘယ်သူလဲ?", notYou: "သင် မဟုတ်ဘူးလား?", approved: "အတည်ပြုပြီး", rejected: "လစာ မရ", hours: "နာရီ", note: "ထပ်ပြောပါ (မဖြစ်မနေမဟုတ်)", noDays: "ဒီလ အလုပ်ရက် မရှိသေးပါ။" }
   };
   const W = () => S.people.worker;
   const me = () => worker(W().workerId);
@@ -1763,6 +1882,7 @@
         const w = worker(n.workerId), name = w ? esc(w.name) : "A worker", site = project(n.projectId) ? esc(project(n.projectId).name) : "";
         if (n.type === "selfie-in") return "<b>" + name + "</b> clocked in with a selfie at " + n.time + (site ? ", " + site : "");
         if (n.type === "selfie-out") return "<b>" + name + "</b> clocked out with a selfie at " + n.time + (site ? ", " + site : "");
+        if (n.type === "face") return n.text === "diff" ? "<b>" + name + "</b>: clock-in and clock-out selfies look like different people" + (n.forDate && n.forDate !== today() ? " (" + fmtDay(n.forDate) + ")" : "") : "<b>" + name + "</b>: no face in the clock-" + (n.side === "in" ? "in" : "out") + " selfie";
         if (n.type === "report") return "<b>" + name + "</b> reported: " + esc(n.text || "") + (n.forDate ? " (" + fmtDay(n.forDate) + ")" : "");
         if (n.type === "confirmed") return W_ ? "<b>" + tr("confirmed") + "</b> " + n.time : "<b>" + name + "</b> confirmed at " + n.time;
         if (n.type === "rejected") return "<b>" + tr("rejected") + "</b>: " + fmtDay(n.forDate) + ". “" + esc(n.text || "") + "”";
@@ -1772,7 +1892,7 @@
       };
       return sheetHead(W_ ? '<span style="display:inline-flex;gap:8px;align-items:center">' + icon("bell", ' style="width:22px;height:22px"') + "</span>" : "Notifications") +
         (list.length ? '<div class="list">' + list.map((n) => '<button class="note' + (n.read ? "" : " unread") + '" data-action="note-open" data-id="' + n.id + '">' +
-          (n.photo ? img(n.photo, "thumb-sm", "") : '<span class="thumb-sm photo-missing">' + icon(n.type === "report" ? "flag" : "check", ' style="width:18px;height:18px"') + "</span>") +
+          (n.photo ? img(n.photo, "thumb-sm", "") : '<span class="thumb-sm photo-missing">' + icon(n.type === "report" ? "flag" : n.type === "face" ? "alert" : "check", ' style="width:18px;height:18px"') + "</span>") +
           '<span class="li-main"><span class="note-t">' + text(n) + '</span><span class="li-sub">' + (n.date === today() ? "Today" : fmtDay(n.date)) + "</span></span>" + (n.read ? "" : '<span class="dot" style="background:var(--blue)"></span>') + "</button>").join("") + "</div>" : empty(W_ ? "–" : "No notifications yet. You will see one here when a worker clocks in with a selfie."));
     },
     panel(s) {
@@ -1787,7 +1907,13 @@
       const site = project(W().siteId), w = me();
       const title = s.act === "in" ? tr("clockIn") : tr("clockOut");
       if (s.step === "confirm") {
-        return sheetHead(title) + '<img class="clock-preview" src="' + (photoSync(s.photo) || s.photo) + '" alt="Selfie">' +
+        const fc = s.face, fcLine = !fc ? "" :
+          fc === "checking" ? '<div class="face-line">' + '<span class="spin"></span>' + tr("faceChecking") + "</div>" :
+          fc === "same" ? '<div class="face-line good">' + icon("check") + tr("faceSame") + "</div>" :
+          fc === "found" ? '<div class="face-line good">' + icon("check") + tr("faceFound") + "</div>" :
+          fc === "diff" ? '<div class="face-line bad">' + icon("alert") + tr("faceDiff") + "</div>" :
+          fc === "noface" ? '<div class="face-line bad">' + icon("alert") + tr("faceNone") + "</div>" : "";
+        return sheetHead(title) + '<img class="clock-preview" src="' + (photoSync(s.photo) || s.photo) + '" alt="Selfie">' + fcLine +
           '<p style="text-align:center;font-size:22px;margin-top:16px"><b style="font-weight:500">' + esc(s.time) + '</b><br><span class="muted" style="font-size:16px">' + esc(w.name) + ", " + esc(site.name) + "</span></p>" +
           '<div class="sheet-foot"><button class="btn btn-soft btn-big" data-action="w-photo">' + tr("retake") + '</button><button class="btn btn-primary btn-big" data-action="w-save">' + icon("check") + tr("confirm") + "</button></div>";
       }
@@ -2192,7 +2318,7 @@
     "w-away"() { ui.workerAway = !ui.workerAway; renderSheet(); },
     "w-photo"() {
       const s = ui.sheet, w = me();
-      const go = (ph) => { if (!ph) return; s.photo = ph; s.time = nowHM(); s.step = "confirm"; renderSheet(); };
+      const go = (ph) => { if (!ph) return; s.photo = ph; s.time = nowHM(); s.step = "confirm"; s.desc = undefined; s.face = realPhoto(ph) ? "checking" : null; renderSheet(); if (realPhoto(ph)) facePreview(s, ph); };
       if (!("ontouchstart" in window)) go("demo-face:" + w.id); else takePhoto("user").then(go);
     },
     async "w-save"() {
@@ -2202,12 +2328,13 @@
       if (!r) { r = { id: uid("at"), workerId: w.id, projectId: sid, date: t, in: null, out: null, inPhoto: null, outPhoto: null, self: null, status: "waiting", adjust: null, note: "" }; S.attendance.push(r); }
       r.self = r.self || {};
       w.hasPhone = true; // they just used their own phone
-      if (s.act === "in") { r.self.in = s.time; r.self.inPhoto = ref; r.self.inLoc = "on site"; }
-      else { r.self.out = s.time; r.self.outPhoto = ref; r.self.outLoc = "on site"; }
+      if (s.act === "in") { r.self.in = s.time; r.self.inPhoto = ref; r.self.inLoc = "on site"; r.self.inFace = s.desc || undefined; }
+      else { r.self.out = s.time; r.self.outPhoto = ref; r.self.outLoc = "on site"; r.self.outFace = s.desc || undefined; }
       notify({ type: s.act === "in" ? "selfie-in" : "selfie-out", to: "site", workerId: w.id, projectId: r.projectId, photo: ref, time: s.time });
       log(s.act === "in" ? "self-in" : "self-out", { workerId: w.id, recId: r.id, projectId: r.projectId, forDate: t, value: s.time });
       save(); closeSheet(); render(); toast((s.act === "in" ? tr("clockIn") : tr("clockOut")) + " " + s.time + ". " + tr("waitingConfirm") + ".");
       window.scrollTo(0, 0);
+      if (realPhoto(ref)) faceCheck(r).catch(() => {});   // finishes in the background if the worker saved before it was done
     },
     "w-report"() { openSheet({ type: "wreport" }); },
     "w-report-save"() {
@@ -2419,6 +2546,12 @@
       done("Approved " + esc(worker(r.workerId).name) + ".", snap, [log("approve", { workerId: r.workerId, recId: r.id, projectId: r.projectId, forDate: r.date, value: hoursText(calcHours(r)) })]);
     },
     "att-no"(el) { openSheet({ type: "reject", recId: el.dataset.id }); },
+    "face-ok"(el) {
+      const r = S.attendance.find((a) => a.id === el.dataset.id); if (!r) return;
+      const snap = snapshot();
+      r.faceOk = { at: new Date().toISOString(), by: actor().byName };
+      done("Marked as the same person.", snap, [log("face-ok", { workerId: r.workerId, recId: r.id, projectId: r.projectId, forDate: r.date })], "check");
+    },
     "att-all"() {
       const snap = snapshot();
       const list = S.attendance.filter((a) => a.projectId === ui.attSite && a.date === ui.attDate && a.status === "waiting" && isDone(a) && !matchOf(a).flag && !needsConfirm(a));
