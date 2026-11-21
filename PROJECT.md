@@ -183,7 +183,7 @@ one are clocked in by the site manager with a photo, as before.
 ## 7. How it works (technical)
 
 - **No build step.** `index.html` loads `styles.css`, `three.min.js` (3D library, MIT, bundled locally), `factory3d.js`, `sample-data.js` and `app.js`.
-- **Updates reach phones straight away:** `index.html` links every file with a version number (`app.js?v=0.6.4`). Bump it on each release so browsers don't keep showing an old cached copy (GitHub Pages lets browsers cache files for 10 minutes).
+- **Updates reach phones straight away:** `index.html` links every file with a version number (`app.js?v=0.6.5`). Bump it on each release so browsers don't keep showing an old cached copy (GitHub Pages lets browsers cache files for 10 minutes).
 - **Data:** everything except photos is one JSON object in `localStorage` (`sitebook-data-v1`). Photos are compressed to ~720px JPEG and kept in **IndexedDB** (`sitebook-photos`).
 - **Screens** are functions returning HTML; clicks are handled in one place through `data-action` attributes.
 - **3D buildings** (`factory3d.js`): each project gets its own randomly generated factory (sawtooth roof, silos) or warehouse (gable roof, loading docks), seeded by the project id. The model shows progress: steel frame → walls going up (teal) → finished, with a tower crane until 92%. One shared WebGL view plus one for still thumbnails. Falls back to a line drawing if WebGL is not available.
@@ -248,6 +248,12 @@ Site manager only worker has no phone                             → neutral, n
 11. **e-Invoicing (LHDN MyInvois)** is being phased in. Accountants will ask for supplier TIN and e-invoice numbers. Plan fields for it before production.
 
 ## 9. Change log
+
+### v0.6.5 — 21 Nov 2026 — short months sit up under the header (phones)
+Client feedback (screenshot of February 2027 floating halfway down the screen): "when the calendar is smaller and shorter, position it closer to the header on mobile."
+- **Months pin to the top on phones** instead of being centred against the tallest (6-week) month, so a 4-week month like February sits right under the ‹ › / Today row.
+- **The calendar is as tall as the month in view.** While you swipe, the height blends smoothly between the two months, so the dots and whatever is below move up or down with it — no empty band under short months.
+- Desktop is unchanged.
 
 ### v0.6.4 — 21 Nov 2026 — comfortable phone calendar
 Client feedback: "on mobile, the calendar needs more whitespace — each month is too close to the next, the view is too compact; I want a comfortable view."

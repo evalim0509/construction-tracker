@@ -911,6 +911,16 @@
       c.style.opacity = (1 - 0.25 * t).toFixed(3);
       c.classList.toggle("focus", t < 0.5);
     });
+    // phones: the calendar is as tall as the month in view (blending while swiping), so short months sit up under the header
+    if (isPhone()) {
+      let w = 0, h = 0;
+      Array.from(car.el.children).forEach((c) => {
+        const cMid = c.offsetLeft - car.el.offsetLeft + c.offsetWidth / 2;
+        const k = 1 - Math.min(1, Math.abs(cMid - mid) / (c.offsetWidth + 28));
+        if (k > 0) { w += k; h += k * c.offsetHeight; }
+      });
+      if (w) car.el.style.height = Math.round(h / w + 36) + "px";
+    } else car.el.style.height = "";
     const f = car.el.querySelector(".cm-month.focus");
     document.querySelectorAll(".car-dots i").forEach((d) => d.classList.toggle("on", !!f && d.dataset.ym === f.dataset.ym));
   }

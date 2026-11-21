@@ -913,8 +913,8 @@ button.back { border: 0; background: none; padding: 0; cursor: pointer; font: in
   .day-panel { margin-top: 0; }
   .mobile-only { display: flex !important; }
   /* comfortable phone calendar: one roomy month, clear space around it, dots show the position */
-  .cal-car { --cw: 88%; margin: 0 -16px; padding: 10px calc((100% - var(--cw)) / 2) 14px; gap: 28px; }
-  .cal-car > .cm-month, .cal-car > .cm-month.cm-now { flex-basis: 100%; margin: 0; padding: 16px 12px 14px; }
+  .cal-car { --cw: 88%; margin: 0 -16px -12px; padding: 10px calc((100% - var(--cw)) / 2) 26px; gap: 28px; align-items: flex-start; box-sizing: border-box; }
+  .cal-car > .cm-month, .cal-car > .cm-month.cm-now { flex-basis: 100%; margin: 0; padding: 16px 12px 14px; transform-origin: top center; }
   .cal-car .cm-title { font-size: 18px; margin: 0 4px 12px; }
   .cal-car .cm-dows { padding-bottom: 10px; }
   .cal-car .cm-day { min-height: 60px; padding: 4px 4px; }
