@@ -183,7 +183,7 @@ one are clocked in by the site manager with a photo, as before.
 ## 7. How it works (technical)
 
 - **No build step.** `index.html` loads `styles.css`, `three.min.js` (3D library, MIT, bundled locally), `factory3d.js`, `sample-data.js` and `app.js`.
-- **Updates reach phones straight away:** `index.html` links every file with a version number (`app.js?v=0.7.0`). Bump it on each release so browsers don't keep showing an old cached copy (GitHub Pages lets browsers cache files for 10 minutes).
+- **Updates reach phones straight away:** `index.html` links every file with a version number (`app.js?v=0.7.1`). Bump it on each release so browsers don't keep showing an old cached copy (GitHub Pages lets browsers cache files for 10 minutes).
 - **Data:** everything except photos is one JSON object in `localStorage` (`sitebook-data-v1`). Photos are compressed to ~720px JPEG and kept in **IndexedDB** (`sitebook-photos`).
 - **Screens** are functions returning HTML; clicks are handled in one place through `data-action` attributes.
 - **3D buildings** (`factory3d.js`): each project gets its own randomly generated factory (sawtooth roof, silos) or warehouse (gable roof, loading docks), seeded by the project id. The model shows progress: steel frame → walls going up (teal) → finished, with a tower crane until 92%. One shared WebGL view plus one for still thumbnails. Falls back to a line drawing if WebGL is not available.
@@ -248,6 +248,14 @@ Site manager only worker has no phone                             → neutral, n
 11. **e-Invoicing (LHDN MyInvois)** is being phased in. Accountants will ask for supplier TIN and e-invoice numbers. Plan fields for it before production.
 
 ## 9. Change log
+
+### v0.7.1 — 21 Nov 2026 — face check fixed on iPhones; worker sees the result
+Client test on an iPhone (woman clocks in, man clocks out): management saw "No face in selfie" although the clock-in selfie clearly shows a face, and the worker saw no warning at all.
+- **Cause 1 (false "no face"):** the library runs on the phone's graphics chip (WebGL) by default. Many iPhones calculate there with lower precision, and faces go missing. The same two selfies, cut from the client's screenshot, are found fine on an exact engine and come out **0.76 apart, so "Different person?"**.
+- **Fix:** once per phone, the same test picture is run on the graphics chip and on the processor (CPU); if the answers differ, or the chip says it cannot do full-precision maths, that phone uses the processor (exact; ~1.5–3 s per selfie). The choice is remembered per phone. And any "no face" answer is double-checked on the processor before it is reported.
+- **Older results are checked again:** results now carry a version (`face.v`); selfies checked by v0.7.0 are re-checked the next time the app opens, and face numbers saved by it are not trusted.
+- **Cause 2 (no worker warning):** when the clock-in selfie had no face, the clock-out screen fell back to a plain "Face found". Now it says "Your clock-in selfie showed no face, so the two selfies cannot be compared. Your site manager will check."
+- **Worker's Today card** now shows the result after saving: "Your clock-out selfie does not look like your clock-in selfie. Your site manager will check." or "No face could be seen in your selfie…", in their language, until the site manager marks it as fine.
 
 ### v0.7.0 — 21 Nov 2026 — automatic face check: flags a different person between clock in and clock out
 Client test: "clock in with a selfie of person A, clock out with person B — it should flag that it is a different person."
