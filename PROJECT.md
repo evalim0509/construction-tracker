@@ -202,7 +202,7 @@ Honest constraints agreed before building:
 ## 7. How it works (technical)
 
 - **No build step.** `index.html` loads `styles.css`, `three.min.js` (3D library, MIT, bundled locally), `factory3d.js`, `sample-data.js` and `app.js`.
-- **Updates reach phones straight away:** `index.html` links every file with a version number (`app.js?v=0.9.0`). Bump it on each release so browsers don't keep showing an old cached copy (GitHub Pages lets browsers cache files for 10 minutes).
+- **Updates reach phones straight away:** `index.html` links every file with a version number (`app.js?v=0.9.1`). Bump it on each release so browsers don't keep showing an old cached copy (GitHub Pages lets browsers cache files for 10 minutes).
 - **Data:** everything except photos is one JSON object in `localStorage` (`sitebook-data-v1`). Photos are compressed to ~720px JPEG and kept in **IndexedDB** (`sitebook-photos`).
 - **Screens** are functions returning HTML; clicks are handled in one place through `data-action` attributes.
 - **3D buildings** (`factory3d.js`): each project gets its own randomly generated factory (sawtooth roof, silos) or warehouse (gable roof, loading docks), seeded by the project id. The model shows progress: steel frame → walls going up (teal) → finished, with a tower crane until 92%. One shared WebGL view plus one for still thumbnails. Falls back to a line drawing if WebGL is not available.
@@ -267,6 +267,14 @@ Site manager only worker has no phone                             → neutral, n
 11. **e-Invoicing (LHDN MyInvois)** is being phased in. Accountants will ask for supplier TIN and e-invoice numbers. Plan fields for it before production.
 
 ## 9. Change log
+
+### v0.9.1 — 21 Nov 2026 — test files for the Blueprint tab; reuse check fixed
+Client: "prepare a sample floor plan PDF and site images for me to upload to test the function."
+- **`test-files/`** (also reachable on the live site): `klang-warehouse-floor-plans.pdf` (2-page A3, 1:200: ground floor 48 × 24 m with office, toilets, store, pipes and 18 columns; level 1 office mezzanine drawn in the same position so floors stack), the ground floor as a PNG, `tracing-guide.png` (wall/pipe names and tracing order so names match the photos), `site-photos/` (Wall 1 and Wall 2 at each stage, Pipe 2 laid → pressure-tested → covered, a column formwork → poured → finished, plus a blurry and a too-dark photo), and `README.md` with the steps and the expected result of each check. Generator scripts in `test-files/tools/`.
+- **Found while making them, fixed:** the 64-bit reuse fingerprint saw two photos of the same part from the same spot at different stages as "the same photo" (pipe laid vs pressure-tested: 0 bits apart; plastered vs painted: 4). Now a second, finer 256-bit fingerprint must also match (≤ 24 bits): a re-saved, cropped copy is 18 bits apart, while real stage photos are 37+. And a near-identical photo of **another** part is still blocked, but one that matches **the same part's last photo** goes to management instead ("Looks almost the same as the last photo… Has the work moved on?").
+- **Daily approval limit:** steps management has already approved no longer count towards "more than 10% of the project in one day".
+- After saving a progress photo, the Blueprint page switches to the Progress view so the result (or the approval waiting) is visible.
+- Tested end to end with the test files exactly as in the README: tracing from the guide gives the drawing's lengths (48, 24, 16, 8 m), each check gives the expected result.
 
 ### v0.9.0 — 21 Nov 2026 — Blueprint tab: trace the plan, photo-checked progress, 3D from the walls
 Built from decisions BP1–BP8 (section 6) and "build now on one device, sync later".

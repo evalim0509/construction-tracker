@@ -5,7 +5,7 @@
    site manager picked:
    - brightness (too dark / washed out)
    - sharpness  (variance of the Laplacian: low = blurry)
-   - fingerprint (difference hash, 64 bits: near-identical photos match)
+   - fingerprints (difference hashes, 64 and 256 bits: near-identical photos match)
    - texture and colour of the middle of the photo (rough block joints vs
      a smooth plastered or painted surface)
    ========================================================================== */
@@ -76,8 +76,18 @@
     }
     let hash = "";
     for (let i = 0; i < 64; i += 4) hash += parseInt(bits.slice(i, i + 4), 2).toString(16);
+    // finer fingerprint: difference hash on a 17x16 thumbnail (256 bits), sees smaller changes such as new paint or a gauge
+    const t2 = pixels(im, 17, 16);
+    let bits2 = "";
+    for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+      const a = t2[(y * 17 + x) * 4] + t2[(y * 17 + x) * 4 + 1] + t2[(y * 17 + x) * 4 + 2];
+      const b = t2[(y * 17 + x + 1) * 4] + t2[(y * 17 + x + 1) * 4 + 1] + t2[(y * 17 + x + 1) * 4 + 2];
+      bits2 += a < b ? "1" : "0";
+    }
+    let hash2 = "";
+    for (let i = 0; i < 256; i += 4) hash2 += parseInt(bits2.slice(i, i + 4), 2).toString(16);
 
-    return { lum: Math.round(lum), sharp: Math.round(sharp), tex: Math.round(tex * 10) / 10, lc: Math.round(lc), sat: Math.round(sat * 100) / 100, hash, w: im.naturalWidth || im.width, h: im.naturalHeight || im.height };
+    return { lum: Math.round(lum), sharp: Math.round(sharp), tex: Math.round(tex * 10) / 10, lc: Math.round(lc), sat: Math.round(sat * 100) / 100, hash, hash2, w: im.naturalWidth || im.width, h: im.naturalHeight || im.height };
   }
 
   // number of different bits between two fingerprints (0 = same photo)

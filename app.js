@@ -1681,9 +1681,15 @@
     else if (m.lum > 245) out.push({ level: "hard", text: "Too bright (washed out). Retake out of direct sun." });
     else out.push({ level: "ok", text: "Bright enough" });
     out.push(m.sharp < 50 ? { level: "hard", text: "Too blurry. Hold the phone still and retake." } : { level: "ok", text: "Sharp" });
+    // reuse: near-identical to a photo of ANOTHER part = blocked (a photo passed off as a different wall);
+    // near-identical to this part's own last photo = management checks (the work may not have moved on)
+    const same = (e) => e.hash && window.PhotoCheck.hamming(e.hash, m.hash) <= 6 && (!e.hash2 || !m.hash2 || window.PhotoCheck.hamming(e.hash2, m.hash2) <= 24);
     let reuse = null;
-    S.projects.forEach((pp) => (pp.parts || []).forEach((x) => (x.log || []).forEach((e) => { if (!reuse && e.hash && window.PhotoCheck.hamming(e.hash, m.hash) <= 6) reuse = [x, e]; })));
-    out.push(reuse ? { level: "hard", text: "Same photo as " + reuse[0].name + " on " + fmtDay(reuse[1].date) + ". Take a new one." } : { level: "ok", text: "Not a photo used before" });
+    S.projects.forEach((pp) => (pp.parts || []).forEach((x) => { if (x !== part) (x.log || []).forEach((e) => { if (!reuse && same(e)) reuse = [x, e]; }); }));
+    const own = (part.log || []).filter((e) => e.status !== "rejected").slice(-1)[0];
+    if (reuse) out.push({ level: "hard", text: "Same photo as " + reuse[0].name + " on " + fmtDay(reuse[1].date) + ". Take a new one of " + part.name + "." });
+    else if (own && same(own)) out.push({ level: "soft", text: "Looks almost the same as the last photo of " + part.name + " (" + fmtDay(own.date) + "). Has the work moved on?" });
+    else out.push({ level: "ok", text: "Not a photo used before" });
     // location
     if (!p.geo) out.push({ level: "info", text: "Site location not set yet, so the place cannot be checked." });
     else if (s.geo) {
@@ -1704,7 +1710,8 @@
       else {
         const all = p.parts || [], tw = all.reduce((t, x) => t + partWeight(p, x), 0) || 1, t0 = today();
         let delta = (partWeight(p, part) * (stagePct(part, tgt) - stagePct(part, cur))) / tw;
-        all.forEach((x) => (x.log || []).forEach((e) => { if (e.date === t0 && e.status !== "rejected") delta += (partWeight(p, x) * (stagePct(x, e.stage) - stagePct(x, e.prevStage || 0))) / tw; }));
+        // today's steps not yet seen by management (approved and rejected ones no longer count)
+        all.forEach((x) => (x.log || []).forEach((e) => { if (e.date === t0 && e.status !== "rejected" && e.status !== "approved") delta += (partWeight(p, x) * (stagePct(x, e.stage) - stagePct(x, e.prevStage || 0))) / tw; }));
         if (delta > (S.settings.bigJumpPct || 10)) out.push({ level: "soft", text: "More than " + (S.settings.bigJumpPct || 10) + "% of the project in one day. Management approves this." });
       }
     }
@@ -3206,8 +3213,9 @@
       const snap = JSON.stringify({ projects: S.projects, notifications: S.notifications });
       const ref = await storePhoto(s.shot.photo);
       const by = actor().byName || ROLE_LABEL[role()];
-      const e = { id: uid("pg"), at: new Date().toISOString(), date: today(), time: nowHM(), stage, prevStage: cur, photo: ref, hash: s.shot.metrics.hash, metrics: { lum: s.shot.metrics.lum, sharp: s.shot.metrics.sharp, lc: s.shot.metrics.lc, sat: s.shot.metrics.sat, tex: s.shot.metrics.tex }, geo: s.geo || null, demo: !!s.shot.demo, flags, status: flags.length ? "pending" : "ok", by, reason: s.dir === "back" ? F().reason.trim() : "" };
+      const e = { id: uid("pg"), at: new Date().toISOString(), date: today(), time: nowHM(), stage, prevStage: cur, photo: ref, hash: s.shot.metrics.hash, hash2: s.shot.metrics.hash2, metrics: { lum: s.shot.metrics.lum, sharp: s.shot.metrics.sharp, lc: s.shot.metrics.lc, sat: s.shot.metrics.sat, tex: s.shot.metrics.tex }, geo: s.geo || null, demo: !!s.shot.demo, flags, status: flags.length ? "pending" : "ok", by, reason: s.dir === "back" ? F().reason.trim() : "" };
       part.log = part.log || []; part.log.push(e);
+      ui.planMode = ui.planMode || {}; ui.planMode[p.id] = "progress";   // show the result on the Progress view
       const what = part.name + " → " + stageName(part, stage) + " (" + stagePct(part, stage) + "%)";
       if (flags.length) notify({ type: "progress", to: "boss", projectId: p.id, photo: ref, text: what, by, partId: part.id });
       const a = log("progress", { projectId: p.id, value: "photographed " + esc(what) + " (" + esc(p.name) + ")" + (e.reason ? ". Reason: “" + esc(e.reason) + "”" : "") + (flags.length ? ". Sent for approval: " + esc(flags.join(" ")) : "") });
