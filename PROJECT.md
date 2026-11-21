@@ -183,7 +183,7 @@ one are clocked in by the site manager with a photo, as before.
 ## 7. How it works (technical)
 
 - **No build step.** `index.html` loads `styles.css`, `three.min.js` (3D library, MIT, bundled locally), `factory3d.js`, `sample-data.js` and `app.js`.
-- **Updates reach phones straight away:** `index.html` links every file with a version number (`app.js?v=0.6.2`). Bump it on each release so browsers don't keep showing an old cached copy (GitHub Pages lets browsers cache files for 10 minutes).
+- **Updates reach phones straight away:** `index.html` links every file with a version number (`app.js?v=0.6.3`). Bump it on each release so browsers don't keep showing an old cached copy (GitHub Pages lets browsers cache files for 10 minutes).
 - **Data:** everything except photos is one JSON object in `localStorage` (`sitebook-data-v1`). Photos are compressed to ~720px JPEG and kept in **IndexedDB** (`sitebook-photos`).
 - **Screens** are functions returning HTML; clicks are handled in one place through `data-action` attributes.
 - **3D buildings** (`factory3d.js`): each project gets its own randomly generated factory (sawtooth roof, silos) or warehouse (gable roof, loading docks), seeded by the project id. The model shows progress: steel frame → walls going up (teal) → finished, with a tower crane until 92%. One shared WebGL view plus one for still thumbnails. Falls back to a line drawing if WebGL is not available.
@@ -248,6 +248,16 @@ Site manager only worker has no phone                             → neutral, n
 11. **e-Invoicing (LHDN MyInvois)** is being phased in. Accountants will ask for supplier TIN and e-invoice numbers. Plan fields for it before production.
 
 ## 9. Change log
+
+### v0.6.3 — 21 Nov 2026 — focus carousel, legend instead of names, back buttons everywhere
+Client feedback (with a reference image of a card carousel): "swipe like this: the current month bigger, the next month smaller; don't write project names on the calendar, use a legend; clean but intuitive; the back-to-main-calendar button on top instead of the bottom; back buttons on all pages."
+- **Focus carousel:** the month in focus sits in the middle at full size; the months either side shrink to 80% (and fade slightly) and peek in from the left and right. The size follows the swipe continuously, so the next month grows into place as the current one shrinks away. Works with finger, trackpad, mouse drag (settles smoothly) and the ‹ › / Today buttons.
+- Tapping a shrunk month (or a line on it) brings that month into focus first; the hover list only appears on the month in focus.
+- **No project names on the calendar.** Each project is a plain thin coloured line. A **legend** above the calendar names the colours; tapping a legend item opens that project's calendar.
+- Days with no free crew say **"Busy"** (was "All busy", which wrapped on phones).
+- **"Back to the main calendar" is at the top** of the project calendar.
+- **Back buttons on every page:** Calendar, Projects, Stock, Money and Check attendance join History, Rejected, Workers & crews, Settings and project pages. Home has none, as it is where Back leads.
+- Fixed: older phone styles from v0.6.1/v0.6.2 overrode the carousel sizes on phones; the mouse-drag listeners were added again on every calendar redraw (now set up once).
 
 ### v0.6.2 — 21 Nov 2026 — calmer calendar, project-only hover
 Client feedback: "make the current month slightly bigger; the projects look packed, just coloured bars all over; in a project calendar the hover shows crews in other projects, I only want what's relevant to that project."

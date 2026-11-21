@@ -865,15 +865,15 @@
         const free = freeCrews(d).length, needs = S.needs.filter((n) => n.by === d && n.status !== "arrived").length;
         return '<div class="cm-day' + (out ? " out" : "") + (d === t && !out ? " today" : "") + (sun ? " sun" : "") + '"' + (out ? "" : ' role="button" tabindex="0" data-action="cal-day" data-hover="day"') + ' data-d="' + d + '" style="grid-column:' + (i + 1) + ";grid-row:1 / span " + (rows + 2) + '">' +
           (out ? "" : '<span class="cm-n">' + parse(d).getDate() + "</span>" + (needs ? '<span class="cm-truck" title="Delivery due">' + icon("truck") + "</span>" : "") +
-          (!sun && S.crews.length ? '<span class="cm-free' + (free ? "" : " none") + '">' + (free ? free + " free" : "All busy") + "</span>" : "")) + "</div>";
+          (!sun && S.crews.length ? '<span class="cm-free' + (free ? "" : " none") + '">' + (free ? free + " free" : "Busy") + "</span>" : "")) + "</div>";
       }).join("");
       const bars = segs.map((x) => {
         const cs = Array.from(new Set(wk.slice(x.a, x.b + 1).flatMap((d) => assignmentsOn(d).filter((a) => a.projectId === x.p.id).map((a) => a.crewId)))).map(crew).filter(Boolean);
-        return '<a class="cm-line" href="#/project/' + x.p.id + '" data-action="cal-proj" data-id="' + x.p.id + '" data-m="' + ym + '" style="--c:' + x.p.color + ";grid-column:" + (x.a + 1) + " / " + (x.b + 2) + ";grid-row:" + (lanes.indexOf(x.p.id) + 2) + '" title="' + esc(x.p.name + ": " + crewNames(cs) + ". Open its calendar.") + '"><span class="cm-lname">' + esc(x.b - x.a >= 2 ? x.p.name : shortName(x.p)) + "</span><i></i></a>";
+        return '<a class="cm-line" href="#/project/' + x.p.id + '" data-action="cal-proj" data-id="' + x.p.id + '" data-m="' + ym + '" style="--c:' + x.p.color + ";grid-column:" + (x.a + 1) + " / " + (x.b + 2) + ";grid-row:" + (lanes.indexOf(x.p.id) + 2) + '" title="' + esc(x.p.name + ": " + crewNames(cs) + ". Open its calendar.") + '" aria-label="' + esc(x.p.name) + '"><i></i></a>';
       }).join("");
-      return '<div class="cm-week" style="grid-template-rows:32px ' + (rows ? "repeat(" + rows + ", 21px) " : "") + '20px">' + cells + bars + "</div>";
+      return '<div class="cm-week" style="grid-template-rows:32px ' + (rows ? "repeat(" + rows + ", 9px) " : "") + '22px">' + cells + bars + "</div>";
     }).join("");
-    return '<section class="card cm cm-month' + (ym === monthKey(today()) ? " cm-now" : "") + '" data-ym="' + ym + '"><h2 class="cm-title">' + MON_LONG[mm - 1] + " " + yy + '</h2><div class="cm-dows">' + ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((x) => "<span>" + x + "</span>").join("") + "</div>" + html + "</section>";
+    return '<section class="card cm cm-month" data-ym="' + ym + '"><h2 class="cm-title">' + MON_LONG[mm - 1] + " " + yy + '</h2><div class="cm-dows">' + ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((x) => "<span>" + x + "</span>").join("") + "</div>" + html + "</section>";
   }
   // months shown in the carousel: 3 back, 11 ahead
   function calMonths() { const out = []; for (let i = -3; i <= 11; i++) out.push(shiftMonth(monthKey(today()), i)); return out; }
@@ -881,71 +881,84 @@
   function viewCalendar() {
     const months = calMonths();
     if (months.indexOf(ui.calMonth) < 0) ui.calMonth = monthKey(today());
-    return '<div class="page-head"><div><h1 class="page-title">Calendar' + helpBtn("Each coloured bar is a project, running across the days its crews work there. Swipe sideways (or drag, or use the arrows) to see other months. Hover over a day (tap on a phone) to see the projects, crews and deliveries. Tap a project to open its own calendar.") + "</h1></div>" +
+    const legend = '<div class="cal-legend">' + S.projects.map((p) => '<a href="#/project/' + p.id + '" data-action="cal-proj" data-id="' + p.id + '" style="--c:' + p.color + '"><i></i>' + esc(p.name) + "</a>").join("") + "</div>";
+    return backLink() + '<div class="page-head"><div><h1 class="page-title">Calendar' + helpBtn("Each coloured line is a project, running across the days its crews work there; the colours are listed above the calendar. Swipe sideways (or drag, or use the arrows) to see other months. Hover over a day (tap on a phone) to see the projects, crews and deliveries. Tap a project in the list to open its own calendar.") + "</h1></div>" +
       (can.manage() || role() === "site" ? '<button class="btn btn-primary btn-sm" data-action="open-assign">' + icon("users") + "Book a crew</button>" : "") + "</div>" +
-      '<div class="row-between" style="margin-bottom:12px"><div class="cal-head"><button class="icon-btn sm" data-action="car-step" data-step="-1" aria-label="Previous month">' + icon("left") + '</button><button class="icon-btn sm" data-action="car-step" data-step="1" aria-label="Next month">' + icon("right") + '</button></div><button class="btn btn-sm" data-action="cal-today">Today</button></div>' +
+      legend +
+      '<div class="row-between" style="margin:10px 0 8px"><div class="cal-head"><button class="icon-btn sm" data-action="car-step" data-step="-1" aria-label="Previous month">' + icon("left") + '</button><button class="icon-btn sm" data-action="car-step" data-step="1" aria-label="Next month">' + icon("right") + '</button></div><button class="btn btn-sm" data-action="cal-today">Today</button></div>' +
       '<div class="cal-car" id="calCar">' + months.map(monthCard).join("") + "</div>";
   }
 
-  /* carousel: start at the chosen month, remember where the user swiped to, drag with a mouse */
-  function setupCarousel() {
-    const car = $("#calCar"); if (!car) return;
-    const cardAt = (ym) => car.querySelector('[data-ym="' + ym + '"]');
-    const first = cardAt(ui.calMonth);
-    if (first) car.scrollLeft = first.offsetLeft - car.offsetLeft;
-    let tmr = 0;
-    car.addEventListener("scroll", () => {
-      clearTimeout(tmr);
-      tmr = setTimeout(() => {
-        const cards = Array.from(car.children);
-        const x = car.scrollLeft;
-        let best = cards[0];
-        cards.forEach((c) => { if (Math.abs(c.offsetLeft - car.offsetLeft - x) < Math.abs(best.offsetLeft - car.offsetLeft - x)) best = c; });
-        ui.calMonth = best.dataset.ym;
-      }, 120);
-    }, { passive: true });
-    // mouse drag (touch and trackpads scroll natively)
-    let drag = null;
-    car.addEventListener("pointerdown", (e) => {
-      if (e.pointerType !== "mouse" || e.button !== 0) return;
-      drag = { x: e.clientX, left: car.scrollLeft, moved: false };
+  /* Carousel: the month in focus sits in the middle at full size; neighbours shrink and peek in from the sides.
+     The size follows the swipe continuously. Touch and trackpads scroll natively; a mouse can drag. */
+  const car = { el: null, drag: null, raf: 0 };
+  const centerLeft = (c) => c.offsetLeft - car.el.offsetLeft - (car.el.clientWidth - c.offsetWidth) / 2;
+  function carNearest(x) {
+    const cards = Array.from(car.el.children);
+    let best = cards[0];
+    cards.forEach((c) => { if (Math.abs(centerLeft(c) - x) < Math.abs(centerLeft(best) - x)) best = c; });
+    return best;
+  }
+  function carPaint() {
+    car.raf = 0;
+    if (!car.el || !car.el.isConnected) return;
+    const mid = car.el.scrollLeft + car.el.clientWidth / 2;
+    Array.from(car.el.children).forEach((c) => {
+      const cMid = c.offsetLeft - car.el.offsetLeft + c.offsetWidth / 2;
+      const t = Math.min(1, Math.abs(cMid - mid) / c.offsetWidth);   // 0 = in focus, 1 = one card away
+      c.style.transform = "scale(" + (1 - 0.2 * t).toFixed(3) + ")";
+      c.style.opacity = (1 - 0.25 * t).toFixed(3);
+      c.classList.toggle("focus", t < 0.5);
     });
-    window.addEventListener("pointermove", (e) => {
-      if (!drag) return;
-      const dx = e.clientX - drag.x;
-      if (!drag.moved && Math.abs(dx) > 6) { drag.moved = true; car.classList.add("dragging"); hideHoverPop(); }
-      if (drag.moved) car.scrollLeft = drag.left - dx;
+  }
+  function setupCarousel() {
+    const el = $("#calCar"); car.el = el; if (!el) return;
+    const start = el.querySelector('[data-ym="' + ui.calMonth + '"]');
+    if (start) el.scrollLeft = centerLeft(start);
+    carPaint();
+    let tmr = 0;
+    el.addEventListener("scroll", () => {
+      if (!car.raf) car.raf = requestAnimationFrame(carPaint);
+      clearTimeout(tmr);
+      tmr = setTimeout(() => { ui.calMonth = carNearest(el.scrollLeft).dataset.ym; }, 120);
+    }, { passive: true });
+    el.addEventListener("pointerdown", (e) => {
+      if (e.pointerType !== "mouse" || e.button !== 0) return;
+      car.drag = { x: e.clientX, left: el.scrollLeft, moved: false };
     });
     // links and text inside the carousel must not start the browser's own drag
-    car.addEventListener("dragstart", (e) => e.preventDefault());
-    const endDrag = () => {
-      if (!drag) return;
-      const moved = drag.moved, startLeft = drag.left;
-      drag = null;
-      if (!moved) return;
-      // settle on the nearest month, leaning in the direction of the drag
-      const cards = Array.from(car.children);
-      const aim = car.scrollLeft + (car.scrollLeft > startLeft ? 0.35 : -0.35) * cards[1].offsetWidth;
-      let best = cards[0];
-      cards.forEach((c) => { if (Math.abs(c.offsetLeft - car.offsetLeft - aim) < Math.abs(best.offsetLeft - car.offsetLeft - aim)) best = c; });
-      car.scrollTo({ left: best.offsetLeft - car.offsetLeft, behavior: "smooth" });
-      // turn snapping back on only after the slide has finished, so it can't pull the calendar back
-      setTimeout(() => car.classList.remove("dragging"), 500);
-      // swallow the click that ends a drag
-      const stop = (ev) => { ev.stopPropagation(); ev.preventDefault(); window.removeEventListener("click", stop, true); };
-      window.addEventListener("click", stop, true);
-      setTimeout(() => window.removeEventListener("click", stop, true), 50);
-    };
-    window.addEventListener("pointerup", endDrag);
-    window.addEventListener("pointercancel", endDrag);
+    el.addEventListener("dragstart", (e) => e.preventDefault());
+  }
+  // window listeners are added once (not on every render)
+  window.addEventListener("pointermove", (e) => {
+    const d = car.drag; if (!d || !car.el) return;
+    const dx = e.clientX - d.x;
+    if (!d.moved && Math.abs(dx) > 6) { d.moved = true; car.el.classList.add("dragging"); hideHoverPop(); }
+    if (d.moved) car.el.scrollLeft = d.left - dx;
+  });
+  function carEndDrag() {
+    const d = car.drag; car.drag = null;
+    if (!d || !d.moved || !car.el) return;
+    const el = car.el, card = el.children[0];
+    const aim = el.scrollLeft + (el.scrollLeft > d.left ? 0.3 : -0.3) * (card ? card.offsetWidth : 0);
+    el.scrollTo({ left: centerLeft(carNearest(aim)), behavior: "smooth" });
+    setTimeout(() => el.classList.remove("dragging"), 500);   // snapping back on only after the slide
+    const stop = (ev) => { ev.stopPropagation(); ev.preventDefault(); window.removeEventListener("click", stop, true); };
+    window.addEventListener("click", stop, true);
+    setTimeout(() => window.removeEventListener("click", stop, true), 50);
+  }
+  window.addEventListener("pointerup", carEndDrag);
+  window.addEventListener("pointercancel", carEndDrag);
+  window.addEventListener("resize", () => { if (car.el && car.el.isConnected) { const c = car.el.querySelector('[data-ym="' + ui.calMonth + '"]'); if (c) car.el.scrollLeft = centerLeft(c); carPaint(); } });
+  function carGo(ym) {
+    if (!car.el) return;
+    const c = car.el.querySelector('[data-ym="' + ym + '"]'); if (!c) return;
+    ui.calMonth = ym;
+    car.el.scrollTo({ left: centerLeft(c), behavior: "smooth" });
   }
   function carStep(step) {
-    const car = $("#calCar"); if (!car) return;
     const months = calMonths();
-    const i = Math.max(0, Math.min(months.length - 1, months.indexOf(ui.calMonth) + step));
-    ui.calMonth = months[i];
-    const c = car.querySelector('[data-ym="' + ui.calMonth + '"]');
-    if (c) car.scrollTo({ left: c.offsetLeft - car.offsetLeft, behavior: "smooth" });
+    carGo(months[Math.max(0, Math.min(months.length - 1, months.indexOf(ui.calMonth) + step))]);
   }
 
   /* one floating hover list (laptops), so it is never cut off by the carousel edges */
@@ -1004,15 +1017,16 @@
         (!sun && !out ? '<div class="crew-bar" aria-label="' + here + " here, " + other + " elsewhere, " + free + ' free"><span class="cb-here" style="width:' + (here / total) * 100 + '%"></span><span class="cb-else" style="width:' + (other / total) * 100 + '%"></span></div><span class="pc-num">' + here + "/" + total + "</span>" : "") +
         "</div>";
     }).join("")).join("");
-    return '<div class="row-between wrap" style="margin-bottom:10px">' + monthNav(ym, "pc-month") +
+    return (ui.calBack ? '<a class="back" style="margin:-4px 0 10px" href="#/calendar">' + icon("left") + "Back to the main calendar</a>" : "") +
+      '<div class="row-between wrap" style="margin-bottom:10px">' + monthNav(ym, "pc-month") +
       '<div class="pc-legend"><span><i class="key k-here"></i>This project</span><span><i class="key k-else"></i>Other projects</span><span><i class="key k-free"></i>Free</span><span>' + icon("truck") + "Delivery</span></div></div>" +
       '<div class="cm-dows">' + ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((x) => "<span>" + x + "</span>").join("") + '</div><div class="pc-grid">' + cells + "</div>" +
-      (ui.calBack ? '<a class="back mt-12" href="#/calendar">' + icon("left") + "Back to the main calendar</a>" : "");
+      "";
   }
 
   /* ---------- Projects ---------- */
   function viewProjects() {
-    const head = '<div class="page-head"><div><h1 class="page-title">Projects</h1></div>' +
+    const head = backLink() + '<div class="page-head"><div><h1 class="page-title">Projects</h1></div>' +
       (can.manage() ? '<button class="btn btn-primary" data-action="new-project">' + icon("plus") + "New project</button>" : "") + "</div>";
     if (!S.projects.length) return head + '<div class="card">' + empty("No projects yet.", can.manage() ? '<br><button class="btn btn-primary" data-action="new-project">Add your first project</button>' : "") + "</div>";
     const t = today();
@@ -1144,7 +1158,7 @@
       (!buy && low.length ? fchip("low", "Running low", low.length, "warn") : "") +
       CATS.filter((c) => counts[c.id]).map((c) => fchip(c.id, c.name, counts[c.id])).join("") + "</div>";
 
-    const head = '<div class="page-head"><div><h1 class="page-title">Stock' + helpBtn("In the yard: what you have in stock, by category. To buy: what the sites still need. Tap a material to see its last movements.") + "</h1></div>" +
+    const head = backLink() + '<div class="page-head"><div><h1 class="page-title">Stock' + helpBtn("In the yard: what you have in stock, by category. To buy: what the sites still need. Tap a material to see its last movements.") + "</h1></div>" +
       '<div class="row wrap"><button class="btn" data-action="open-material" data-kind="out">' + icon("out") + "Material out</button>" +
       '<button class="btn btn-primary" data-action="open-material" data-kind="in">' + icon("in") + "Material in</button></div></div>";
     const bar = '<div class="stock-bar"><div class="seg"><button class="' + (!buy ? "on" : "") + '" data-action="stock-tab" data-tab="yard">In the yard</button><button class="' + (buy ? "on" : "") + '" data-action="stock-tab" data-tab="buy">To buy (' + needs.length + ")</button></div>" +
@@ -1238,7 +1252,7 @@
 
     if (!can.seeMoney()) {
       const mine = receipts.filter((m) => m.by === role() && isOut(m));
-      return '<div class="page-head"><div><h1 class="page-title">Money' + helpBtn("Receipts and cash you logged, by category. Company totals are only shown to management.") + "</h1></div>" +
+      return backLink() + '<div class="page-head"><div><h1 class="page-title">Money' + helpBtn("Receipts and cash you logged, by category. Company totals are only shown to management.") + "</h1></div>" +
         '<button class="btn btn-primary" data-action="open-receipt">' + icon("camera") + "Snap a receipt</button></div>" +
         '<div class="row-between wrap" style="margin-bottom:16px">' + monthNav + projSel + "</div>" +
         receiptsBody(mine, "You have not logged anything this month.");
@@ -1270,7 +1284,7 @@
     const maxC = byCat.length ? byCat[0].v : 1;
     const spending = () => byCat.length ? byCat.map((x) => '<button class="spend-row" data-action="money-cat-open" data-cat="' + x.c.id + '"><span class="tile-ic sm">' + icon(x.c.icon) + '</span><span class="spend-name">' + esc(x.c.name) + '</span><span class="bar blue"><span style="width:' + (x.v / maxC) * 100 + '%"></span></span><span class="num spend-amt">' + RMshort(x.v) + ' <span class="muted small">' + Math.round((x.v / (spent || 1)) * 100) + "%</span></span></button>").join("") + '<p class="tiny muted mt-12">Tap a category to see its receipts.</p>' : empty("Nothing spent in " + MON_LONG[mo - 1] + ".");
 
-    return '<div class="page-head"><div><h1 class="page-title">Money' + helpBtn("Receipts, bills to pay and money expected from clients. Use “Download for accountant” to send the list to your accountant. Wages are not included in the cash plan yet.") + "</h1></div>" +
+    return backLink() + '<div class="page-head"><div><h1 class="page-title">Money' + helpBtn("Receipts, bills to pay and money expected from clients. Use “Download for accountant” to send the list to your accountant. Wages are not included in the cash plan yet.") + "</h1></div>" +
       '<div class="row wrap"><button class="btn" data-action="export-csv">' + icon("download") + "Download for accountant</button>" +
       '<button class="btn btn-primary" data-action="open-receipt">' + icon("camera") + "Snap a receipt</button></div></div>" +
       '<div class="row-between wrap" style="margin-bottom:16px">' + monthNav + projSel + "</div>" +
@@ -1480,7 +1494,7 @@
 
     const help = can.approve() ? "To do: workers waiting for you to confirm, or where your time and the worker's differ by more than " + S.settings.matchMinutes + " minutes. Hours are worked out automatically, but you have the final say. Tap a worker to see the photos, change the hours or reject the day."
       : "Only the site manager can confirm, approve or change attendance. Tap a worker to see the photos.";
-    return '<div class="page-head"><div><h1 class="page-title">Check attendance' + helpBtn(help) + "</h1></div>" +
+    return backLink() + '<div class="page-head"><div><h1 class="page-title">Check attendance' + helpBtn(help) + "</h1></div>" +
       (can.approve() && easy.length ? '<button class="btn btn-primary btn-sm" data-action="att-all">' + icon("check") + "Approve " + easy.length + " ready</button>" : "") + "</div>" +
       controls + otherDaysLine(sid, d, otherReports) + (p ? tabs + wages : "") + list;
   }
@@ -2253,10 +2267,14 @@
     "cal-today"() { const months = calMonths(); carStep(months.indexOf(monthKey(today())) - months.indexOf(ui.calMonth)); },
     "cal-day"(el, e) {
       hideHoverPop();
+      const card = el.closest(".cm-month");
+      if (card && !card.classList.contains("focus")) { carGo(card.dataset.ym); return; }
       // laptop: the hover list already shows; a click (or a tap on a phone) opens it as a pop-up
       openSheet({ type: "daylist", d: el.dataset.d });
     },
     "cal-proj"(el) {
+      const card = el.closest(".cm-month");
+      if (card && !card.classList.contains("focus")) { carGo(card.dataset.ym); return; }
       closeSheet();
       ui.calBack = true; ui.calJump = true; ui.projCalMonth = el.dataset.m || null; ui.tile.project = "cal"; ui.lastProj = el.dataset.id;
       ui.pendingPanel = isPhone() ? { g: "project", t: "cal" } : null;
@@ -2376,7 +2394,7 @@
     const pop = $("#hoverPop");
     if (pop && pop.contains(e.target)) { clearTimeout(hoverTmr); return; }
     const el = e.target.closest("[data-hover]");
-    if (el && !(e.target.closest(".cm-line")) && !document.querySelector(".cal-car.dragging")) { clearTimeout(hoverTmr); hoverTmr = setTimeout(() => showHoverPop(el), 120); return; }
+    if (el && !(e.target.closest(".cm-line")) && !document.querySelector(".cal-car.dragging") && !(el.closest(".cm-month") && !el.closest(".cm-month.focus"))) { clearTimeout(hoverTmr); hoverTmr = setTimeout(() => showHoverPop(el), 120); return; }
     clearTimeout(hoverTmr); hoverTmr = setTimeout(hideHoverPop, 200);
   });
   document.addEventListener("input", (e) => {
