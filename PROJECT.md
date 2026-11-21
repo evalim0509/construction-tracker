@@ -180,6 +180,25 @@ one are clocked in by the site manager with a photo, as before.
 - **Sections:** tabs with an icon, word and count; the open one is underlined.
 - **Navigation:** left sidebar on laptop and tablet; flat top bar with the Log button and a flat bottom bar docked to the edge on phones.
 
+### Blueprint progress (planned, v0.9) — decisions BP1–BP8
+Client: "a separate tab: I upload the blueprint, the site manager photographs a specific wall, part or pipe, picks it from a dropdown (Wall 1, 2…), the photo is analysed by rules to determine progress accurately, and that updates the 3D model built from the floor plan."
+
+Honest constraints agreed before building:
+- Fixed rules (colour, brightness) alone cannot reliably read a stage from a phone photo (shadows, dust, angle): right roughly 6–7 times in 10. So **the site manager picks the stage, and rules check that the photo can be trusted** and flag mismatches.
+- Auto-detecting walls in scanned plans is unreliable, so walls are **traced once** on the plan.
+- The app has no server yet: photos and data stay on the device that took them until syncing is added.
+
+| # | Question | Answer |
+|---|---|---|
+| BP1 | How are parts created from the blueprint? | **Trace on the plan**: tap both ends of each wall/pipe (columns: one tap); auto-named Wall 1, Wall 2…, renameable; scale set once by tapping a known dimension |
+| BP2 | How is progress measured? | **Fixed stages per type, each worth a %**: Wall: Not started 0 → Blockwork 40 → Plastered 70 → Painted 100. Pipe: Laid 50 → Pressure-tested 80 → Covered 100. Column: Formwork 30 → Concrete poured 80 → Finished 100. Editable in Settings |
+| BP3 | Who decides the stage? | **Site manager picks; rules check the photo**, including a simple colour check (e.g. "Painted" but the wall looks raw grey → sent to management to confirm) |
+| BP4 | Safeguards (all chosen) | **Fresh camera photo on site** (no gallery; time + GPS within the site distance) · **one stage at a time** (going back needs a reason) · **photo quality + reuse check** (too blurry, too dark, same photo as before) · **management approves big jumps** (a part reaching 100%, or >10% of the project in a day) |
+| BP5 | 3D model | **Built from the traced walls; walls rise as they progress**: not started = faint outline, blockwork = grey block, plastered = smooth light grey, painted = finished colour; pipes as coloured lines; tap a wall to see its photos |
+| BP6 | Roll-up | **Weighted by size, per phase**: each part type belongs to a phase (walls → Roofing & wall cladding, pipes → M&E, columns → Steel structure); phase % = parts' progress weighted by length; feeds the phase timeline and project %; a phase can be finished only when its parts reach 100% |
+| BP7 | Picking the part | **Dropdown grouped by type, with search, plus a mini plan** highlighting the chosen part (or tap it on the plan) |
+| BP8 | Blueprint files | **PDF or image, one plan per floor** (Ground, Level 1…); the 3D stacks floors |
+
 ## 7. How it works (technical)
 
 - **No build step.** `index.html` loads `styles.css`, `three.min.js` (3D library, MIT, bundled locally), `factory3d.js`, `sample-data.js` and `app.js`.
