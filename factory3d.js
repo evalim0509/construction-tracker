@@ -39,8 +39,89 @@
     } catch (e) { return false; }
   })();
 
+  /* ---------- building from a traced blueprint ----------
+     opts.plan = { floors: [{ elev, w, d, parts: [{ id, type, x1, z1, x2, z2, look, h }] }] } in metres.
+     Walls rise as they progress: look 0 = faint outline on the floor, 1 = grey blockwork,
+     2 = smooth plaster, 3 = painted. Pipes are lines at knee height; columns are posts. */
+  function blockTexture() {
+    const T = window.THREE;
+    if (blockTexture.t) return blockTexture.t;
+    const c = document.createElement("canvas"); c.width = 128; c.height = 64;
+    const g = c.getContext("2d");
+    g.fillStyle = "#5F686F"; g.fillRect(0, 0, 128, 64);
+    g.fillStyle = "#8E979E";
+    for (let row = 0; row < 4; row++) for (let col = -1; col < 3; col++) g.fillRect(col * 64 + (row % 2) * 32 + 2, row * 16 + 2, 60, 12);
+    const t = new T.CanvasTexture(c); t.wrapS = t.wrapT = T.RepeatWrapping;
+    blockTexture.t = t;
+    return t;
+  }
+  function buildPlanModel(plan) {
+    const T = window.THREE;
+    const g = new T.Group();
+    const edgeMat = new T.LineBasicMaterial({ color: COLORS.edge, transparent: true, opacity: 0.18 });
+    const mats = {};
+    const mat = (key, make) => mats[key] || (mats[key] = make());
+    const std = (hex, extra) => { const m = new T.MeshStandardMaterial(Object.assign({ roughness: 0.9, metalness: 0.02 }, extra || {})); m.color.setHex(hex).convertSRGBToLinear(); return m; };
+    const WALL = [
+      () => mat("w0", () => std(0xB8C1C8, { transparent: true, opacity: 0.55 })),
+      () => mat("w1", () => { const m = std(0xFFFFFF); m.map = blockTexture(); return m; }),
+      () => mat("w2", () => std(0xC3C9CE)),
+      () => mat("w3", () => std(0xEBDDC2))
+    ];
+    const PIPE = [0xC4CCD2, 0x8A959E, 0x3563C4, 0x2E8B57];
+    const COL = [0xC4CCD2, 0xB08A5A, 0x8C959C, 0x77828B];
+    let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity, top = 0;
+    const fl = plan.floors || [];
+    fl.forEach((f) => f.parts.forEach((pt) => { minX = Math.min(minX, pt.x1, pt.x2); maxX = Math.max(maxX, pt.x1, pt.x2); minZ = Math.min(minZ, pt.z1, pt.z2); maxZ = Math.max(maxZ, pt.z1, pt.z2); }));
+    if (!isFinite(minX)) { minX = 0; maxX = 20; minZ = 0; maxZ = 12; }
+    const cx = (minX + maxX) / 2, cz = (minZ + maxZ) / 2;
+    const ground = new T.Mesh(new T.PlaneGeometry(400, 400), new T.ShadowMaterial({ opacity: 0.12 }));
+    ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; g.add(ground);
+    fl.forEach((f) => {
+      const y0 = f.elev || 0;
+      // floor slab under the traced area
+      const slab = new T.Mesh(new T.BoxGeometry(maxX - minX + 2, 0.2, maxZ - minZ + 2), mat("slab", () => std(COLORS.slab)));
+      slab.position.set(0, y0 - 0.1, 0); slab.receiveShadow = true; g.add(slab);
+      f.parts.forEach((pt) => {
+        const x1 = pt.x1 - cx, z1 = pt.z1 - cz, x2 = pt.x2 - cx, z2 = pt.z2 - cz;
+        const len = Math.max(0.05, Math.hypot(x2 - x1, z2 - z1)), ang = Math.atan2(z2 - z1, x2 - x1);
+        let m;
+        if (pt.type === "wall") {
+          const h = pt.look > 0 ? (pt.h || 4) : 0.06;
+          m = new T.Mesh(new T.BoxGeometry(len, h, 0.22), WALL[Math.min(3, pt.look)]());
+          if (pt.look === 1) { m.material = m.material.clone(); m.material.map = blockTexture().clone(); m.material.map.needsUpdate = true; m.material.map.repeat.set(len / 1.6, h / 0.8); }
+          m.position.set((x1 + x2) / 2, y0 + h / 2, (z1 + z2) / 2);
+          m.rotation.y = -ang;
+          top = Math.max(top, y0 + h);
+        } else if (pt.type === "pipe") {
+          m = new T.Mesh(new T.CylinderGeometry(0.09, 0.09, len, 10), mat("p" + pt.look, () => std(PIPE[Math.min(3, pt.look)], pt.look ? {} : { transparent: true, opacity: 0.6 })));
+          m.rotation.z = Math.PI / 2; const wrap = new T.Group(); wrap.add(m); wrap.rotation.y = -ang;
+          wrap.position.set((x1 + x2) / 2, y0 + 0.35, (z1 + z2) / 2);
+          m.userData.partId = pt.id; m.castShadow = true;
+          g.add(wrap);
+          return;
+        } else {
+          const h = pt.look > 0 ? (pt.h || 4) * (pt.look === 1 ? 0.6 : 1) : 0.06;
+          m = new T.Mesh(new T.BoxGeometry(0.45, h, 0.45), mat("c" + pt.look + "-" + h, () => std(COL[Math.min(3, pt.look)], pt.look ? {} : { transparent: true, opacity: 0.6 })));
+          m.position.set(x1, y0 + h / 2, z1);
+          top = Math.max(top, y0 + h);
+        }
+        m.castShadow = true; m.receiveShadow = true;
+        m.userData.partId = pt.id;
+        if (pt.look > 0) m.add(new T.LineSegments(new T.EdgesGeometry(m.geometry, 20), edgeMat));
+        g.add(m);
+      });
+    });
+    const W = maxX - minX, D = maxZ - minZ;
+    g.userData.radius = Math.sqrt(Math.pow(W / 2 + 3, 2) + Math.pow(D / 2 + 3, 2) + Math.pow(Math.max(4, top) / 2, 2));
+    g.userData.cy = Math.max(2, top) * 0.3;
+    g.userData.zoom = 0.6;   // fill more of the view than the generic model
+    return g;
+  }
+
   /* ---------- building ---------- */
   function buildModel(opts) {
+    if (opts.plan) return buildPlanModel(opts.plan);
     const T = window.THREE;
     const r = rng(opts.seed || "x");
     const p = clamp(opts.progress == null ? 0.5 : opts.progress, 0, 1);
@@ -255,20 +336,20 @@
     const r = model.userData.radius || 20;
     const vf = (cam.fov * Math.PI) / 180;
     const hf = 2 * Math.atan(Math.tan(vf / 2) * aspect);
-    const d = (r / Math.sin(Math.min(vf, hf) / 2)) * (zoom || 0.82);
+    const d = (r / Math.sin(Math.min(vf, hf) / 2)) * (zoom || model.userData.zoom || 0.82);
     const dir = new window.THREE.Vector3(0.74, 0.5, 0.86).normalize();
     cam.position.set(dir.x * d, dir.y * d + (model.userData.cy || 3), dir.z * d);
     cam.lookAt(0, model.userData.cy || 3, 0);
   }
 
   /* ---------- live view (one shared renderer) ---------- */
-  const live = { renderer: null, scene: null, camera: null, model: null, key: "", host: null, raf: 0, rotY: -0.5, drag: null, visible: true, ro: null, io: null };
+  const live = { renderer: null, scene: null, camera: null, model: null, key: "", host: null, raf: 0, rotY: -0.5, drag: null, visible: true, ro: null, io: null, onPick: null };
 
   function loop() {
     live.raf = requestAnimationFrame(loop);
     if (!live.host || !live.host.isConnected || !live.visible || document.hidden) return;
     const reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    if (!live.drag && !reduce) live.rotY += 0.0018;
+    if (!live.drag && !reduce && !live.onPick) live.rotY += 0.0018;
     if (live.model) {
       live.model.rotation.y = live.rotY;
       if (live.model.userData.jib && !reduce) live.model.userData.jib.rotation.y += 0.002;
@@ -296,15 +377,26 @@
       const cv = live.renderer.domElement;
       cv.setAttribute("aria-label", "3D model of the building. Drag to turn it.");
       cv.setAttribute("role", "img");
-      cv.addEventListener("pointerdown", (e) => { live.drag = { x: e.clientX, r: live.rotY }; cv.setPointerCapture(e.pointerId); });
-      cv.addEventListener("pointermove", (e) => { if (live.drag) live.rotY = live.drag.r + (e.clientX - live.drag.x) * 0.008; });
+      cv.addEventListener("pointerdown", (e) => { live.drag = { x: e.clientX, y: e.clientY, r: live.rotY, moved: false }; cv.setPointerCapture(e.pointerId); });
+      cv.addEventListener("pointermove", (e) => { if (live.drag) { if (Math.abs(e.clientX - live.drag.x) > 5) live.drag.moved = true; live.rotY = live.drag.r + (e.clientX - live.drag.x) * 0.008; } });
+      // a tap (no drag) on a wall, pipe or column of a blueprint model opens it
+      cv.addEventListener("pointerup", (e) => {
+        const d = live.drag;
+        if (!d || d.moved || !live.onPick || !live.model) return;
+        const r = cv.getBoundingClientRect();
+        const ray = new T.Raycaster();
+        ray.setFromCamera(new T.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1), live.camera);
+        const hit = ray.intersectObject(live.model, true).find((h) => h.object.userData.partId);
+        if (hit) live.onPick(hit.object.userData.partId);
+      });
       const end = () => { live.drag = null; };
       cv.addEventListener("pointerup", end); cv.addEventListener("pointercancel", end);
       live.ro = new ResizeObserver(resize);
       live.io = new IntersectionObserver((ents) => { live.visible = ents.some((x) => x.isIntersecting); });
       loop();
     }
-    const key = [opts.seed, Math.round((opts.progress || 0) * 100), opts.type].join("|");
+    live.onPick = opts.onPick || null;
+    const key = [opts.seed, Math.round((opts.progress || 0) * 100), opts.type, opts.planKey || ""].join("|");
     if (live.key !== key) {
       if (live.model) { live.scene.remove(live.model); disposeGroup(live.model); }
       live.model = buildModel(opts);
@@ -326,7 +418,7 @@
   let thumbR = null, thumbScene = null, thumbCam = null;
   function thumb(opts, w, h) {
     w = w || 640; h = h || 360;
-    const key = [opts.seed, Math.round((opts.progress || 0) * 100), opts.type, w, h].join("|");
+    const key = [opts.seed, Math.round((opts.progress || 0) * 100), opts.type, opts.planKey || "", w, h].join("|");
     if (thumbCache[key]) return thumbCache[key];
     if (!hasGL) return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(fallbackSVG(opts));
     const T = window.THREE;

@@ -180,7 +180,7 @@ one are clocked in by the site manager with a photo, as before.
 - **Sections:** tabs with an icon, word and count; the open one is underlined.
 - **Navigation:** left sidebar on laptop and tablet; flat top bar with the Log button and a flat bottom bar docked to the edge on phones.
 
-### Blueprint progress (planned, v0.9) — decisions BP1–BP8
+### Blueprint progress (v0.9.0) — decisions BP1–BP8
 Client: "a separate tab: I upload the blueprint, the site manager photographs a specific wall, part or pipe, picks it from a dropdown (Wall 1, 2…), the photo is analysed by rules to determine progress accurately, and that updates the 3D model built from the floor plan."
 
 Honest constraints agreed before building:
@@ -202,7 +202,7 @@ Honest constraints agreed before building:
 ## 7. How it works (technical)
 
 - **No build step.** `index.html` loads `styles.css`, `three.min.js` (3D library, MIT, bundled locally), `factory3d.js`, `sample-data.js` and `app.js`.
-- **Updates reach phones straight away:** `index.html` links every file with a version number (`app.js?v=0.8.0`). Bump it on each release so browsers don't keep showing an old cached copy (GitHub Pages lets browsers cache files for 10 minutes).
+- **Updates reach phones straight away:** `index.html` links every file with a version number (`app.js?v=0.9.0`). Bump it on each release so browsers don't keep showing an old cached copy (GitHub Pages lets browsers cache files for 10 minutes).
 - **Data:** everything except photos is one JSON object in `localStorage` (`sitebook-data-v1`). Photos are compressed to ~720px JPEG and kept in **IndexedDB** (`sitebook-photos`).
 - **Screens** are functions returning HTML; clicks are handled in one place through `data-action` attributes.
 - **3D buildings** (`factory3d.js`): each project gets its own randomly generated factory (sawtooth roof, silos) or warehouse (gable roof, loading docks), seeded by the project id. The model shows progress: steel frame → walls going up (teal) → finished, with a tower crane until 92%. One shared WebGL view plus one for still thumbnails. Falls back to a line drawing if WebGL is not available.
@@ -267,6 +267,24 @@ Site manager only worker has no phone                             → neutral, n
 11. **e-Invoicing (LHDN MyInvois)** is being phased in. Accountants will ask for supplier TIN and e-invoice numbers. Plan fields for it before production.
 
 ## 9. Change log
+
+### v0.9.0 — 21 Nov 2026 — Blueprint tab: trace the plan, photo-checked progress, 3D from the walls
+Built from decisions BP1–BP8 (section 6) and "build now on one device, sync later".
+- **Where:** project page → **Blueprint** tab (summary) → **Open blueprint** (page `#/plan/<project>`) with three views: **Progress**, **Trace parts**, **3D**. Also **Log → Progress photo**.
+- **Upload:** PDF (choose the page if there are several; rendered with **PDF.js**, Mozilla, Apache 2.0, files `pdf.min.js` + `pdf.worker.min.js`, loaded only when a PDF is opened) or a picture. One plan per floor ("Add floor"); floor name and height editable; floors stack in 3D.
+- **Trace:** Set scale (tap both ends of a known dimension, type metres) → Wall / Pipe tools (tap start, tap end; lines chain from corner to corner; snap to nearby ends; straighten within 6°; tap the same point or Stop to end) → Column tool (one tap). Auto names Wall 1, Pipe 1, Column 1 (renameable); Undo last part; zoom 100–300%.
+- **Progress photo (site manager or management):** pick the part from a **dropdown grouped by type** with a **mini plan that highlights it** (or tap it on the plan) → the next stage only ("Go back" needs a reason) → **camera photo** → checks shown in plain words:
+  - blocks saving (red): taken more than 10 minutes ago (file time and the photo's EXIF time); too dark (brightness < 40); washed out (> 245); blurry (sharpness < 50, measured in the sharpest areas so a smooth painted wall is not called blurry); the same photo as one used before (64-bit fingerprint, ≤ 6 bits different);
+  - sends to management (amber): taken away from the site (GPS, fresh reading, site distance + accuracy); for walls, darker than the wall's last photo (plaster and paint make it lighter) or grey like bare blocks when "Painted" is picked; the part reaching 100%; more than 10% of the project in one day (setting).
+  - Measurements in `photocheck.js`; thresholds tested on sharp, blurred, dark and re-saved photos (sharp 340–1100 vs blurred 4–40; dark < 30; re-saved copy 2 bits vs a different photo 37).
+- **Management:** "photos waiting" list with the flags and **Approve / Send back** (reason); notifications both ways; everything in History; Undo.
+- **Site location:** "Set site location here" on the Blueprint page (stand on site); photos are checked against it.
+- **Roll-up (BP6):** part % = its stage %; a type's % and a phase's % are weighted by length (columns count as 3 m). Unfinished phases count their parts' % in the project %, the phase timeline shows "61% built", and a phase cannot be ticked finished until its parts are at 100%.
+- **3D (BP5):** built from the traced parts in metres: not started = faint outline on the floor, blockwork = grey block texture at full height, plastered = smooth grey, painted = cream; pipes coloured by stage; columns rise; floors stacked by height. Tap a part in 3D to open it. The project's top 3D model switches to this model once parts are traced.
+- **Settings → Blueprint stages:** rename stages, change their %, choose which phase each type counts towards, and the one-day approval threshold.
+- **Sample data:** Shah Alam Factory has a drawn ground-floor plan (60 × 40 m sheet) with 13 walls, 4 pipes and 18 columns traced, a photo history, and one photo waiting for approval. Existing devices get it with Settings → Reload sample data.
+- **Data:** `project.plans[] { id, name, img, w, h, scale (m per px), level, height }`, `project.parts[] { id, planId, type, name, a, b, log[] }`, log entry `{ stage, prevStage, photo, hash, metrics, geo, flags[], status ok|pending|approved|rejected, by, reason, approvedBy, rejectReason }`, `project.geo`, `settings.partTypes`, `settings.bigJumpPct`.
+- **Honest limits:** the stage is picked by a person; the colour rule is a hint, not a reading of the photo. Photos and data stay on the device until syncing is added. A determined cheat could photograph another site's wall at this site, which is why one-stage-at-a-time, reuse checks and approval of big jumps are all on.
 
 ### v0.8.0 — 21 Nov 2026 — planned vs actual phases on the project calendar
 Client: "for the project-specific calendar, I want current phases and planned phases." UI decided question by question:

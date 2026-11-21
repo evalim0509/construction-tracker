@@ -50,3 +50,6 @@ browser. No install needed.
 - **Money** (as Management): tap **Where it went** to see spending by category; **Download for accountant** gives a CSV for Excel.
 - **Construction worker:** switch "Viewing as" to Construction worker, tap **Scan QR code**, pick a site and a name, then **Clock in**. Switch back to Site manager and confirm them under the **To confirm** tile.
 - **Project page → Site QR:** the poster workers scan at the gate.
+
+## Blueprint progress (v0.9)
+Open a project → **Blueprint** → upload a PDF or picture of the floor plan → **Trace parts** (set the scale, then tap the ends of each wall/pipe, tap each column) → the site manager uses **Progress photo** to photograph a part and move it one stage up. The app checks the photo (fresh, on site, sharp, bright, not reused) and sends doubtful or big steps to management. Progress feeds the phases, the project % and the 3D model. The sample Shah Alam Factory already has a traced plan.

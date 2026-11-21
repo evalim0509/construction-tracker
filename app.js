@@ -135,6 +135,9 @@
     // keep the site manager's original photo times, so later changes never overwrite them
     S.attendance.forEach((a) => { if (!a.orig && a.inPhoto && a.in && !(a.self && a.self.in === a.in)) a.orig = { in: a.in, out: a.outPhoto ? a.out : null }; });
     S.projects.forEach(planPhases);
+    S.settings.partTypes = S.settings.partTypes || JSON.parse(JSON.stringify(PART_TYPES_DEFAULT));
+    if (S.settings.bigJumpPct == null) S.settings.bigJumpPct = 10;
+    S.projects.forEach((p) => { p.plans = p.plans || []; p.parts = p.parts || []; });
   }
   /* Phases: planned dates (planStart/planEnd) and real dates (startedOn/doneOn).
      The plan is filled in once from the project's original dates, split by a typical share per phase;
@@ -384,6 +387,37 @@
     renderSheet();
   }
 
+  // PDF blueprints: PDF.js (Mozilla, Apache 2.0) is loaded only when a PDF is opened
+  let pdfReady = null;
+  function openPdf(file) {
+    if (!pdfReady) pdfReady = new Promise((res, rej) => {
+      if (window.pdfjsLib) return res();
+      const sc = document.createElement("script"); sc.src = "pdf.min.js"; sc.onload = res; sc.onerror = rej; document.head.appendChild(sc);
+    }).then(() => { window.pdfjsLib.GlobalWorkerOptions.workerSrc = "pdf.worker.min.js"; });
+    return pdfReady.then(() => file.arrayBuffer()).then((buf) => window.pdfjsLib.getDocument({ data: buf }).promise);
+  }
+  async function pdfPage(pdf, n) {
+    const page = await pdf.getPage(n), v1 = page.getViewport({ scale: 1 });
+    const k = Math.min(4, 2400 / Math.max(v1.width, v1.height)), v = page.getViewport({ scale: k });
+    const c = document.createElement("canvas"); c.width = Math.round(v.width); c.height = Math.round(v.height);
+    const g = c.getContext("2d"); g.fillStyle = "#fff"; g.fillRect(0, 0, c.width, c.height);
+    await page.render({ canvasContext: g, viewport: v }).promise;
+    return { url: c.toDataURL("image/jpeg", 0.88), w: c.width, h: c.height };
+  }
+  // location for the "at the site" check, asked when the progress sheet opens
+  function progGeo(s) {
+    if (!navigator.geolocation) { s.geoErr = "not supported on this phone"; return; }
+    navigator.geolocation.getCurrentPosition((pos) => { s.geo = { lat: pos.coords.latitude, lng: pos.coords.longitude, acc: pos.coords.accuracy }; if (ui.sheet === s) renderSheet(); },
+      (err) => { s.geoErr = err.code === 1 ? "permission denied" : "not found"; if (ui.sheet === s) renderSheet(); }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });   // always a fresh reading, never an old one
+  }
+  // a phase with blueprint parts can be finished only when all its parts are at 100% (BP6)
+  function unbuilt(p, ph) {
+    const i = p.phases.indexOf(ph), pp = phasePartsPct(p, i);
+    if (pp == null || pp >= 0.999) return false;
+    const left = phaseParts(p, i).filter((x) => partPct(x) < 100).length;
+    toast("“" + esc(ph.name) + "” is " + Math.round(pp * 100) + "% built on the blueprint; " + plural(left, "part") + " not at 100% yet. Finish those first.", "alert");
+    return true;
+  }
   // one-tap phase changes from the phase sheet, with Undo and a History entry
   function phaseSet(phId, fn) {
     const s = ui.sheet, p = project(s.id), ph = p && p.phases.find((x) => x.id === phId); if (!ph) return;
@@ -411,8 +445,39 @@
       '<rect x="22" y="128" width="30" height="6" rx="3" fill="#3D4B57"/><rect x="74" y="128" width="28" height="6" rx="3" fill="#3D4B57"/></svg>';
     return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
   }
+  // demo blueprint: a factory ground floor plan, 1200 x 800 px at 1 px = 5 cm (60 m x 40 m)
+  function demoPlan() {
+    let g = "";
+    const xs = [100, 300, 500, 700, 900, 1100], ys = [100, 400, 700], L = "ABCDEF";
+    xs.forEach((x, i) => { g += '<line x1="' + x + '" y1="40" x2="' + x + '" y2="760" stroke="#9AA6AF" stroke-width="1" stroke-dasharray="14 4 2 4"/><circle cx="' + x + '" cy="28" r="13" fill="#fff" stroke="#55626C"/><text x="' + x + '" y="33" font-size="14" text-anchor="middle" fill="#2B3944">' + L[i] + "</text>"; });
+    ys.forEach((y, i) => { g += '<line x1="40" y1="' + y + '" x2="1160" y2="' + y + '" stroke="#9AA6AF" stroke-width="1" stroke-dasharray="14 4 2 4"/><circle cx="26" cy="' + y + '" r="13" fill="#fff" stroke="#55626C"/><text x="26" y="' + (y + 5) + '" font-size="14" text-anchor="middle" fill="#2B3944">' + (i + 1) + "</text>"; });
+    const wall = (x1, y1, x2, y2) => '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 + '" stroke="#2B3944" stroke-width="9"/><line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 + '" stroke="#fff" stroke-width="4" stroke-dasharray="3 5"/>';
+    [[100, 100, 1100, 100], [1100, 100, 1100, 700], [1100, 700, 100, 700], [100, 700, 100, 100], [100, 460, 400, 460], [400, 460, 400, 700], [250, 460, 250, 700]].forEach((w) => { g += wall.apply(null, w); });
+    xs.forEach((x) => ys.forEach((y) => { g += '<rect x="' + (x - 8) + '" y="' + (y - 8) + '" width="16" height="16" fill="#2B3944"/>'; }));
+    g += '<rect x="620" y="694" width="120" height="12" fill="#fff"/><path d="M620 700 A120 120 0 0 1 740 580" fill="none" stroke="#55626C" stroke-width="1.5"/><line x1="740" y1="700" x2="740" y2="580" stroke="#55626C" stroke-width="1.5"/>';
+    g += '<line x1="150" y1="150" x2="1050" y2="150" stroke="#C0392B" stroke-width="2" stroke-dasharray="10 6"/><text x="600" y="143" font-size="12" fill="#C0392B" text-anchor="middle">FIRE MAIN 100mm</text>';
+    g += '<line x1="1100" y1="640" x2="420" y2="640" stroke="#3563C4" stroke-width="2" stroke-dasharray="10 6"/><line x1="420" y1="640" x2="420" y2="480" stroke="#3563C4" stroke-width="2" stroke-dasharray="10 6"/><text x="760" y="633" font-size="12" fill="#3563C4" text-anchor="middle">COLD WATER 50mm</text>';
+    g += '<line x1="175" y1="700" x2="175" y2="770" stroke="#7A5CC9" stroke-width="2" stroke-dasharray="10 6"/><line x1="1100" y1="250" x2="1160" y2="250" stroke="#3563C4" stroke-width="2" stroke-dasharray="10 6"/>';
+    g += '<text x="700" y="330" font-size="26" fill="#55626C" text-anchor="middle" letter-spacing="3">PRODUCTION HALL</text><text x="325" y="590" font-size="16" fill="#55626C" text-anchor="middle">OFFICE</text><text x="175" y="590" font-size="16" fill="#55626C" text-anchor="middle">TOILETS</text>';
+    g += '<line x1="100" y1="785" x2="1100" y2="785" stroke="#55626C"/><text x="600" y="780" font-size="13" fill="#55626C" text-anchor="middle">50 000</text><line x1="1180" y1="100" x2="1180" y2="700" stroke="#55626C"/><text x="1172" y="400" font-size="13" fill="#55626C" text-anchor="middle" transform="rotate(-90 1172 400)">30 000</text>';
+    g += '<rect x="880" y="712" width="300" height="80" fill="#fff" stroke="#2B3944"/><text x="895" y="736" font-size="13" fill="#2B3944" font-weight="bold">GCL BUILDERS SDN BHD</text><text x="895" y="756" font-size="12" fill="#2B3944">SHAH ALAM FACTORY</text><text x="895" y="776" font-size="12" fill="#2B3944">GROUND FLOOR PLAN   1:200</text>';
+    return "data:image/svg+xml;charset=utf-8," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800" font-family="Arial, sans-serif"><rect width="1200" height="800" fill="#FBFCFD"/>' + g + "</svg>");
+  }
+  // demo progress photos: a simple drawing of the part at that stage
+  function demoProg(ref) {
+    const [, type, st] = ref.split(":"), stage = +st;
+    let body = "";
+    if (type === "wall") {
+      if (stage <= 1) { body = '<rect width="110" height="90" fill="#7F878D"/>'; for (let r = 0; r < 9; r++) for (let k = -1; k < 6; k++) body += '<rect x="' + (k * 22 + (r % 2) * 11 + 1) + '" y="' + (r * 10 + 1) + '" width="20" height="8" fill="#' + ["9DA4AA", "A7AEB3", "959DA3"][(r + k + 3) % 3] + '"/>'; }
+      else body = '<rect width="110" height="90" fill="' + (stage === 2 ? "#C9C7C2" : "#EFEADF") + '"/>';
+    } else if (type === "pipe") body = '<rect width="120" height="90" fill="#C9CDD0"/><rect y="55" width="120" height="35" fill="#8C8072"/><rect y="64" width="120" height="9" fill="' + (stage >= 3 ? "#7D7266" : stage === 2 ? "#3563C4" : "#9AA3AA") + '"/>';
+    else body = '<rect width="120" height="90" fill="#C9CDD0"/><rect x="48" width="24" height="90" fill="' + (stage === 1 ? "#A47E52" : "#A8AFB4") + '"/>';
+    return "data:image/svg+xml;charset=utf-8," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120"><rect width="120" height="120" fill="#C9CDD0"/>' + body + '<rect y="90" width="120" height="30" fill="#77706A"/><rect x="110" width="10" height="90" fill="#B5BBC0"/></svg>');
+  }
   function photoSync(ref) {
     if (!ref) return null;
+    if (ref.startsWith("demo-plan:")) return demoPlan(ref);
+    if (ref.startsWith("demo-prog:")) return demoProg(ref);
     if (ref.startsWith("demo-face:")) return demoFace(ref);
     if (ref.startsWith("demo-receipt:")) return demoReceipt(ref);
     if (ref.startsWith("data:")) return ref;
@@ -503,7 +568,8 @@
     buy: () => role() === "boss" || role() === "buyer"
   };
 
-  function progress(p) { return p.phases.length ? p.phases.filter((x) => x.done).length / p.phases.length : 0; }
+  // a finished phase counts fully; an unfinished one counts by how far its blueprint parts are built (if any)
+  function progress(p) { return p.phases.length ? p.phases.reduce((t, x, i) => t + (x.done ? 1 : phasePartsPct(p, i) || 0), 0) / p.phases.length : 0; }
   function lateDays(p) { return Math.max(0, diffDays(p.originalEnd || p.end, p.end)); }
   function nextPhase(p) { return p.phases.find((x) => !x.done); }
   function projectStatus(p) {
@@ -618,7 +684,7 @@
   function myNotes() {
     if (role() === "worker") { const w = me(); return w ? S.notifications.filter((n) => n.to === "worker" && n.workerId === w.id) : []; }
     if (role() === "site") { const sid = siteId(); return S.notifications.filter((n) => n.to === "site" && n.projectId === sid); }
-    if (role() === "boss") return S.notifications.filter((n) => n.to === "site");
+    if (role() === "boss") return S.notifications.filter((n) => n.to === "site" || n.to === "boss");
     return [];
   }
   const unreadCount = () => myNotes().filter((n) => !n.read).length;
@@ -725,7 +791,7 @@
     const [name, id] = h.split("/");
     return { name: name || "today", id };
   }
-  function tabOf(r) { return r.name === "project" ? "projects" : r.name; }
+  function tabOf(r) { return r.name === "project" || r.name === "plan" ? "projects" : r.name; }
 
   function renderTop() {
     const top = $("#topbar"), bn = $("#bottomnav");
@@ -771,7 +837,7 @@
     const main = $("#main");
     const r = route();
     if (role() === "worker") { main.innerHTML = viewWorker(); after(); if (ui.sheet && /^(wclock|wreport)$/.test(ui.sheet.type)) renderSheet(); return; }
-    const views = { history: viewHistory, bin: viewBin, today: viewToday, calendar: viewCalendar, projects: viewProjects, project: viewProject, stock: viewStock, money: viewMoney, attendance: viewAttendance, team: viewTeam, settings: viewSettings };
+    const views = { plan: viewPlan, history: viewHistory, bin: viewBin, today: viewToday, calendar: viewCalendar, projects: viewProjects, project: viewProject, stock: viewStock, money: viewMoney, attendance: viewAttendance, team: viewTeam, settings: viewSettings };
     main.innerHTML = (views[r.name] || viewToday)(r.id);
     after();
     if (ui.sheet && ui.sheet.type === "panel") renderSheet();
@@ -781,7 +847,7 @@
     setTimeout(() => faceSweep().catch(() => {}), 400);
     $$("[data-3d]").forEach((el) => {
       const p = project(el.dataset["3d"]);
-      if (p) window.Factory3D.attach(el, { seed: p.id + p.name, progress: progress(p), type: p.type });
+      if (p) window.Factory3D.attach(el, Object.assign({ seed: p.id + p.name, progress: progress(p), type: p.type }, hasPlan3D(p) ? Object.assign(plan3DModel(p), { onPick: (pid) => openSheet({ type: "part", pid: p.id, id: pid }) }) : {}));
     });
     $$("details[data-fold]").forEach((d) => d.addEventListener("toggle", () => { d.open ? ui.open.add(d.dataset.fold) : ui.open.delete(d.dataset.fold); }));
     hideHoverPop();
@@ -1004,7 +1070,7 @@
       const isNow = np && np.id === ph.id;
       return '<div class="phase ' + (ph.done ? "done" : "") + '">' +
         '<button class="tick ' + (ph.done ? "on" : isNow ? "now" : "") + '" ' + (can.tick() ? 'data-action="tick" data-id="' + p.id + '" data-ph="' + ph.id + '"' : "disabled") + ' aria-label="' + (ph.done ? "Mark not done: " : "Mark done: ") + esc(ph.name) + '">' + icon("check") + "</button>" +
-        '<div class="li-main"><div class="li-title">' + esc(ph.name) + '</div><div class="li-sub">' + (ph.planStart ? "Planned " + fmtShort(ph.planStart) + " – " + fmtShort(ph.planEnd) + " · " : "") + esc(ph.planStart ? phaseInfo(ph).label : ph.done ? "Done " + fmtDate(ph.doneOn) : isNow ? "Working on this now" : "Not started") + "</div></div></div>";
+        '<div class="li-main"><div class="li-title">' + esc(ph.name) + '</div><div class="li-sub">' + (ph.planStart ? "Planned " + fmtShort(ph.planStart) + " – " + fmtShort(ph.planEnd) + " · " : "") + esc(ph.planStart ? phaseInfo(ph).label : ph.done ? "Done " + fmtDate(ph.doneOn) : isNow ? "Working on this now" : "Not started") + (!ph.done && phasePartsPct(p, p.phases.indexOf(ph)) != null ? " · " + Math.round(phasePartsPct(p, p.phases.indexOf(ph)) * 100) + "% built" : "") + "</div></div></div>";
     }).join("");
   }
 
@@ -1357,7 +1423,8 @@
           (ph.done && aEnd >= m0 && aEnd <= m1 ? '<b class="ptl-tick' + (onTime ? "" : " late") + '" style="left:' + pos(addDays(aEnd, 1)).toFixed(2) + '%">' + icon("check") + "</b>" : "");
       }
       const tag = can.tick() ? 'button type="button" data-action="phase-open" data-id="' + p.id + '" data-ph="' + ph.id + '"' : "div";
-      return "<" + tag + ' class="ptl-row' + (inf.day ? " now" : "") + '"><span class="ptl-name"><b>' + esc(ph.name) + '</b><small class="' + inf.cls + '">' + esc(inf.label) + "</small></span>" +
+      const built = !ph.done ? phasePartsPct(p, p.phases.indexOf(ph)) : null;
+      return "<" + tag + ' class="ptl-row' + (inf.day ? " now" : "") + '"><span class="ptl-name"><b>' + esc(ph.name) + '</b><small class="' + inf.cls + '">' + esc(inf.label) + (built != null ? " · " + Math.round(built * 100) + "% built" : "") + "</small></span>" +
         '<span class="ptl-track">' + bar(ph.planStart, ph.planEnd, "pl") + actual + todayLine + "</span></" + tag.split(" ")[0] + ">";
     }).join("");
     const ticks = [1, 8, 15, 22, 29].filter((d) => d <= n).map((d) => '<span style="left:' + ((d - 1) / n * 100).toFixed(2) + '%">' + d + "</span>").join("");
@@ -1373,6 +1440,275 @@
       (shown.length ? '<div class="ptl-head"><span class="ptl-name"></span><span class="ptl-track ptl-ticks">' + ticks + todayLine + "</span></div>" + rows : '<div class="muted small ptl-none">No phases this month.</div>') +
       '<div class="ptl-foot"><span><i class="k pl"></i>Planned</span><span><i class="k ac"></i>Actual</span><span><i class="k late"></i>Past the plan</span><span><i class="k ok"></i>Done on time</span>' + (more ? '<span class="muted">' + more + " this month</span>" : "") + "</div>" +
       "</div>";
+  }
+
+  /* ---------- Blueprint progress (decisions BP1–BP8 in PROJECT.md) ----------
+     Each floor (p.plans) has a blueprint image. Parts (p.parts) are traced on it in the blueprint's pixels:
+     walls and pipes have two ends (a, b), columns one point (a). plan.scale = metres per pixel.
+     A part's log holds its progress photos; only "ok" and "approved" entries count towards progress. */
+  const PART_TYPES_DEFAULT = {
+    wall: { label: "Wall", plural: "Walls", phase: 3, stages: [["Not started", 0], ["Blockwork done", 40], ["Plastered", 70], ["Painted", 100]] },
+    pipe: { label: "Pipe", plural: "Pipes", phase: 4, stages: [["Not started", 0], ["Laid", 50], ["Pressure-tested", 80], ["Covered", 100]] },
+    column: { label: "Column", plural: "Columns", phase: 2, stages: [["Not started", 0], ["Formwork up", 30], ["Concrete poured", 80], ["Finished", 100]] }
+  };
+  const PART_ORDER = ["wall", "pipe", "column"];
+  const DEFAULT_MPP = 0.05;          // metres per blueprint pixel until the scale is set
+  const FRESH_MIN = 10;              // a progress photo must be taken within the last 10 minutes
+  const ptype = (t) => S.settings.partTypes[t] || PART_TYPES_DEFAULT[t];
+  const planOf = (p, part) => (p.plans || []).find((x) => x.id === part.planId);
+  const counts = (e) => e.status === "ok" || e.status === "approved";
+  function partStage(part) { let s = 0; (part.log || []).forEach((e) => { if (counts(e)) s = e.stage; }); return s; }
+  const partPending = (part) => (part.log || []).find((e) => e.status === "pending");
+  const stageName = (part, i) => (ptype(part.type).stages[i] || ["?"])[0];
+  const stagePct = (part, i) => (ptype(part.type).stages[i] || [0, 0])[1];
+  const partPct = (part) => stagePct(part, partStage(part));
+  function partLen(p, part) {
+    if (part.type === "column" || !part.b) return 0;
+    const pl = planOf(p, part);
+    return Math.hypot(part.b[0] - part.a[0], part.b[1] - part.a[1]) * ((pl && pl.scale) || DEFAULT_MPP);
+  }
+  const partWeight = (p, part) => (part.type === "column" ? 3 : Math.max(0.5, partLen(p, part)));
+  function partsPct(p, list) {
+    let w = 0, v = 0;
+    list.forEach((x) => { const k = partWeight(p, x); w += k; v += (k * partPct(x)) / 100; });
+    return w ? v / w : null;
+  }
+  const phaseParts = (p, i) => (p.parts || []).filter((x) => ptype(x.type).phase === i);
+  function phasePartsPct(p, i) { const l = phaseParts(p, i); return l.length ? partsPct(p, l) : null; }
+  const stageColor = (pct) => (pct <= 0 ? "#AEB8C0" : pct >= 100 ? "#2E8B57" : pct < 60 ? "#D08A2E" : "#2F6F73");
+  function nextPartName(p, type) {
+    let n = 0;
+    (p.parts || []).forEach((x) => { if (x.type === type) { const m = /(\d+)$/.exec(x.name); if (m) n = Math.max(n, +m[1]); } });
+    return ptype(type).label + " " + (n + 1);
+  }
+  const metres = (m) => (m >= 10 ? m.toFixed(0) : m.toFixed(1)) + " m";
+  function partSub(p, x) {
+    const pl = planOf(p, x);
+    return [(p.plans || []).length > 1 && pl ? pl.name : "", x.type !== "column" ? metres(partLen(p, x)) : "", stageName(x, partStage(x))].filter(Boolean).join(" · ");
+  }
+  function distM(a, b) {   // metres between two GPS points
+    const R = 6371000, t = Math.PI / 180, dLa = (b.lat - a.lat) * t, dLo = (b.lng - a.lng) * t;
+    const h = Math.sin(dLa / 2) ** 2 + Math.cos(a.lat * t) * Math.cos(b.lat * t) * Math.sin(dLo / 2) ** 2;
+    return 2 * R * Math.asin(Math.sqrt(h));
+  }
+  const ago = (ms) => { const m = Math.round(ms / 60000); return m < 60 ? plural(m, "minute") : m < 2880 ? plural(Math.round(m / 60), "hour") : plural(Math.round(m / 1440), "day"); };
+
+  // 3D: the traced floors, in metres, for factory3d.js
+  function plan3DModel(p) {
+    const plans = (p.plans || []).slice().sort((a, b) => a.level - b.level);
+    let elev = 0;
+    const floors = plans.map((pl) => {
+      const k = pl.scale || DEFAULT_MPP, f = { elev, parts: [] };
+      elev += pl.height || 4;
+      (p.parts || []).filter((x) => x.planId === pl.id).forEach((x) => {
+        const n = ptype(x.type).stages.length, s = partStage(x);
+        const look = s === 0 ? 0 : s >= n - 1 ? 3 : s === 1 ? 1 : 2;
+        const b = x.b || x.a;
+        f.parts.push({ id: x.id, type: x.type, x1: x.a[0] * k, z1: x.a[1] * k, x2: b[0] * k, z2: b[1] * k, look, h: pl.height || 4 });
+      });
+      return f;
+    });
+    const key = plans.map((pl) => pl.id + pl.scale + pl.height).join() + "|" + (p.parts || []).map((x) => x.id + partStage(x) + x.a + x.b).join("|");
+    return { plan: { floors }, planKey: String(hashStr(key)) };
+  }
+  const hasPlan3D = (p) => !!(p.parts && p.parts.length);
+
+  // blueprint with traced parts drawn on top (SVG in the blueprint's own pixels)
+  function planBoard(p, pl, o) {
+    o = o || {};
+    const parts = (p.parts || []).filter((x) => x.planId === pl.id);
+    const big = Math.max(pl.w, pl.h), sw = big / (o.mini ? 120 : 170), fs = big / (o.mini ? 48 : 70);
+    const label = (x, cx, cy) => '<text class="pl-lbl" x="' + cx.toFixed(1) + '" y="' + cy.toFixed(1) + '" font-size="' + fs.toFixed(1) + '" stroke-width="' + (fs / 4).toFixed(1) + '">' + esc(x.type === "column" ? x.name.replace(/^Column /, "") : x.name.replace(/^(Wall|Pipe) /, (m, t) => t[0])) + "</text>";
+    const items = parts.map((x) => {
+      const pct = partPct(x), col = stageColor(pct), hi = o.highlight === x.id, pend = !!partPending(x);
+      const act = o.pick ? ' data-action="' + o.pick + '" data-id="' + x.id + '"' : "";
+      // columns are many and small: label them only while tracing or when chosen
+      const showLbl = o.labels !== false && (!o.mini || hi) && (x.type !== "column" || hi || o.tap);
+      if (x.type === "column") {
+        const r = sw * 1.6;
+        return '<g class="pp' + (hi ? " hi" : "") + '"' + act + ">" + (hi ? '<circle cx="' + x.a[0] + '" cy="' + x.a[1] + '" r="' + (r * 2.4) + '" fill="rgba(53,99,196,.28)"/>' : "") +
+          '<rect x="' + (x.a[0] - r) + '" y="' + (x.a[1] - r) + '" width="' + 2 * r + '" height="' + 2 * r + '" fill="' + col + '"' + (pct ? "" : ' fill-opacity=".55"') + "/>" +
+          '<circle class="hit" cx="' + x.a[0] + '" cy="' + x.a[1] + '" r="' + r * 3 + '"/>' + (pend ? '<circle cx="' + (x.a[0] + r) + '" cy="' + (x.a[1] - r) + '" r="' + r * 0.8 + '" fill="#D08A2E" stroke="#fff" stroke-width="' + r * 0.3 + '"/>' : "") +
+          (showLbl ? label(x, x.a[0] + r * 1.6, x.a[1] - r * 1.4) : "") + "</g>";
+      }
+      const [x1, y1] = x.a, [x2, y2] = x.b, w = x.type === "pipe" ? sw * 0.65 : sw;
+      const mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
+      const dash = pct ? "" : ' stroke-dasharray="' + (w * 2.2).toFixed(1) + " " + (w * 1.6).toFixed(1) + '"';
+      return '<g class="pp' + (hi ? " hi" : "") + '"' + act + ">" +
+        (hi ? '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 + '" stroke="rgba(53,99,196,.35)" stroke-width="' + w * 3.4 + '" stroke-linecap="round"/>' : "") +
+        '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 + '" stroke="' + col + '" stroke-width="' + w + '" stroke-linecap="' + (x.type === "pipe" ? "round" : "butt") + '"' + dash + "/>" +
+        '<line class="hit" x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 + '" stroke-width="' + w * 4 + '"/>' +
+        (pend ? '<circle cx="' + mx + '" cy="' + my + '" r="' + sw * 1.1 + '" fill="#D08A2E" stroke="#fff" stroke-width="' + sw * 0.35 + '"/>' : "") +
+        (showLbl ? label(x, mx + sw * 1.2, my - sw * 1.2) : "") + "</g>";
+    }).join("");
+    const start = o.start ? '<circle cx="' + o.start[0] + '" cy="' + o.start[1] + '" r="' + sw * 1.4 + '" fill="#3563C4" stroke="#fff" stroke-width="' + sw * 0.4 + '"/>' : "";
+    const zoom = o.mini ? 1 : ui.planZoom || 1;
+    // the mini plan (progress photo sheet) always shows the whole floor, at most 260 px tall
+    const wStyle = o.mini ? "width:min(100%," + Math.round((260 * pl.w) / pl.h) + "px);margin:0 auto" : "width:" + zoom * 100 + "%";
+    return '<div class="plan-board' + (o.mini ? " mini" : "") + (o.tap ? " tracing" : "") + '"><div class="plan-zoom" style="' + wStyle + '">' +
+      img(pl.img, "plan-img", pl.name) +
+      '<svg class="plan-svg" viewBox="0 0 ' + pl.w + " " + pl.h + '" preserveAspectRatio="none"' + (o.tap ? ' data-action="' + o.tap + '" data-plan="' + pl.id + '"' : "") + ">" + items + start + "</svg></div></div>";
+  }
+  const planLegend = () => '<div class="plan-legend"><span><i style="background:#AEB8C0"></i>Not started</span><span><i style="background:#D08A2E"></i>Started</span><span><i style="background:#2F6F73"></i>Nearly done</span><span><i style="background:#2E8B57"></i>Done</span><span><i class="dot" style="background:#D08A2E"></i>Waiting for approval</span></div>';
+
+  function typeBars(p, list) {
+    return PART_ORDER.map((t) => {
+      const l = list.filter((x) => x.type === t); if (!l.length) return "";
+      const pct = partsPct(p, l), done = l.filter((x) => partPct(x) >= 100).length;
+      return '<div class="bp-type"><div class="row-between"><b>' + ptype(t).plural + '</b><span class="num">' + Math.round(pct * 100) + "%</span></div>" + pbar(pct, "teal") + '<div class="small muted">' + done + " of " + l.length + " done</div></div>";
+    }).join("");
+  }
+  function pendingList(p) {
+    const rows = [];
+    (p.parts || []).forEach((x) => (x.log || []).forEach((e) => { if (e.status === "pending") rows.push([x, e]); }));
+    if (!rows.length) return "";
+    return '<div class="card bp-pending"><h2 class="card-title">' + plural(rows.length, "photo") + " waiting for management</h2>" + rows.map(([x, e]) =>
+      '<div class="li">' + img(e.photo, "thumb-sm", x.name) + '<div class="li-main"><div class="li-title">' + esc(x.name) + " → " + esc(stageName(x, e.stage)) + " (" + stagePct(x, e.stage) + '%)</div><div class="li-sub">' + esc(e.by) + ", " + fmtDay(e.date) + " " + esc(e.time) + "</div>" +
+      (e.flags || []).map((f) => '<div class="bp-flag">' + icon("alert") + "<span>" + esc(f) + "</span></div>").join("") + "</div>" +
+      (can.manage() ? '<div class="bp-acts"><button class="btn btn-sm btn-primary" data-action="prog-approve" data-pid="' + p.id + '" data-part="' + x.id + '" data-e="' + e.id + '">Approve</button><button class="btn btn-sm btn-soft" data-action="prog-reject" data-pid="' + p.id + '" data-part="' + x.id + '" data-e="' + e.id + '">Send back</button></div>' : chip("Waiting", "warn")) + "</div>").join("") + "</div>";
+  }
+  // summary inside the project's Blueprint tab
+  function blueprintSummary(p) {
+    const parts = p.parts || [];
+    const open = '<button class="btn btn-primary mt-12" data-action="plan-open" data-id="' + p.id + '">' + icon("image") + (p.plans && p.plans.length ? "Open blueprint" : "Upload a blueprint") + "</button>";
+    if (!parts.length) return '<p class="muted">' + (p.plans && p.plans.length ? "Trace the walls, pipes and columns on the blueprint to start tracking them." : "Upload the blueprint (PDF or picture), trace the walls, pipes and columns, then the site manager photographs each part as it progresses.") + "</p>" + open;
+    const pend = parts.filter((x) => partPending(x)).length;
+    return '<div class="bp-total"><span class="num">' + Math.round(partsPct(p, parts) * 100) + '%</span><span class="muted small">built, weighted by size, from ' + plural(parts.length, "part") + "</span></div>" +
+      '<div class="bp-types">' + typeBars(p, parts) + "</div>" + (pend ? '<div class="report mt-12">' + icon("alert") + "<div>" + plural(pend, "photo") + " waiting for management approval.</div></div>" : "") + open;
+  }
+
+  /* the Blueprint page: #/plan/<project id> */
+  function viewPlan(id) {
+    const p = project(id);
+    if (!p) return backLink() + empty("Project not found.");
+    p.plans = p.plans || []; p.parts = p.parts || [];
+    ui.planFloor = ui.planFloor || {}; ui.planMode = ui.planMode || {};
+    const plans = p.plans.slice().sort((a, b) => a.level - b.level);
+    const pl = plans.find((x) => x.id === ui.planFloor[id]) || plans[0];
+    const mode = ui.planMode[id] || "progress";
+    const edit = can.tick();
+    const head = '<a class="back" href="#/project/' + p.id + '">' + icon("left") + esc(p.name) + "</a>" +
+      '<div class="page-head"><div><h1 class="page-title">Blueprint' + helpBtn("Upload the blueprint of each floor and trace its walls, pipes and columns once. The site manager then photographs a part and picks it from the list; the app checks the photo can be trusted (taken just now with the camera, at the site, sharp, bright enough, not used before) and that the stage goes up one step at a time. Big jumps and photos that do not look right wait for management. Progress is weighted by size and feeds the work phases and the 3D model.") + '</h1><p class="page-sub">' + esc(p.name) + "</p></div>" +
+      (edit && p.parts.length ? '<button class="btn btn-primary" data-action="open-progress" data-id="' + p.id + '">' + icon("camera") + "Progress photo</button>" : "") + "</div>";
+    if (!pl) return head + '<div class="card bp-empty">' + icon("image") + "<h2>No blueprint yet</h2><p class=\"muted\">Upload a PDF or a picture of the floor plan. You can add more floors later.</p>" +
+      (edit ? '<button class="btn btn-primary" data-action="plan-upload" data-id="' + p.id + '">' + icon("plus") + "Upload blueprint</button>" : '<p class="muted small">Management or the site manager can upload it.</p>') + "</div>";
+    const floors = '<div class="chips bp-floors">' + plans.map((x) => '<button class="fchip ' + (x.id === pl.id ? "on" : "") + '" data-action="plan-floor" data-pid="' + p.id + '" data-id="' + x.id + '">' + esc(x.name) + "</button>").join("") +
+      (edit ? '<button class="fchip" data-action="plan-upload" data-id="' + p.id + '">' + icon("plus") + "Add floor</button>" : "") + "</div>";
+    const seg = '<div class="seg-tabs">' + [["progress", "Progress"], edit ? ["parts", "Trace parts"] : null, ["3d", "3D"]].filter(Boolean).map(([k, l]) => '<button class="' + (mode === k ? "on" : "") + '" data-action="plan-mode" data-pid="' + p.id + '" data-m="' + k + '">' + l + "</button>").join("") + "</div>";
+    const zoomBtns = '<div class="bp-zoom"><button class="icon-btn sm" data-action="plan-zoom" data-z="-1" aria-label="Zoom out">−</button><span class="small muted">' + Math.round((ui.planZoom || 1) * 100) + '%</span><button class="icon-btn sm" data-action="plan-zoom" data-z="1" aria-label="Zoom in">+</button></div>';
+    const floorParts = p.parts.filter((x) => x.planId === pl.id);
+    let body = "";
+    if (mode === "3d") {
+      body = hasPlan3D(p) ? '<div class="card"><div class="plan-3d" data-3d="' + p.id + '"></div><p class="small muted mt-8">Drag to turn. Tap a wall, pipe or column to see its photos. Walls rise as they progress: outline = not started, grey blocks = blockwork, smooth grey = plastered, cream = painted.</p></div>' : '<div class="card">' + empty("Trace some parts first, then they show here in 3D.") + "</div>";
+    } else if (mode === "parts" && edit) {
+      const tool = ui.planTool || "wall";
+      const tb = (k, l) => '<button class="fchip ' + (tool === k ? "on" : "") + '" data-action="plan-tool" data-t="' + k + '">' + l + "</button>";
+      const hint = tool === "scale" ? "Tap both ends of a line whose real length you know (for example a dimension on the plan)." :
+        tool === "column" ? "Tap each column." :
+        ui.planStart ? "Tap the next corner to continue the " + ptype(tool).label.toLowerCase() + ", or Stop." : "Tap where the " + ptype(tool).label.toLowerCase() + " starts, then where it ends. Lines snap straight and to nearby ends.";
+      body = '<div class="card bp-tools"><div class="row-between wrap" style="gap:8px"><div class="chips">' + tb("wall", "Wall") + tb("pipe", "Pipe") + tb("column", "Column") + tb("scale", "Set scale") + "</div>" + zoomBtns + "</div>" +
+        '<p class="small bp-hint">' + icon(tool === "scale" ? "sliders" : "edit") + "<span>" + hint + "</span></p>" +
+        '<div class="row wrap" style="gap:8px">' + (ui.planStart ? '<button class="btn btn-sm btn-soft" data-action="plan-stop">Stop</button>' : "") + (floorParts.length ? '<button class="btn btn-sm btn-soft" data-action="plan-undo" data-pid="' + p.id + '">' + icon("undo") + "Undo last part</button>" : "") +
+        '<span class="small ' + (pl.scale ? "muted" : "warn-text") + '">' + (pl.scale ? "Scale set: 1 m = " + (1 / pl.scale).toFixed(1) + " px" : "Scale not set yet: lengths are estimates. Use Set scale.") + "</span></div></div>" +
+        planBoard(p, pl, { tap: "plan-tap", start: ui.planStart }) +
+        '<div class="card mt-16"><h2 class="card-title">Parts on ' + esc(pl.name) + " (" + floorParts.length + ")</h2>" + (floorParts.length ? partList(p, floorParts) : empty("Nothing traced yet.")) + "</div>" +
+        '<div class="card mt-16"><h2 class="card-title">Floor settings</h2><div class="grid-2"><label class="field"><span>Floor name</span><input class="input" data-change="plan-meta" data-k="name" data-pid="' + p.id + '" data-id="' + pl.id + '" value="' + esc(pl.name) + '"></label>' +
+        '<label class="field"><span>Floor height (m), for the 3D model</span><input class="input" type="number" step="0.5" min="2" data-change="plan-meta" data-k="height" data-pid="' + p.id + '" data-id="' + pl.id + '" value="' + (pl.height || 4) + '"></label></div>' +
+        '<button class="btn btn-sm btn-danger" data-action="plan-del" data-pid="' + p.id + '" data-id="' + pl.id + '">' + icon("trash") + "Remove this floor</button></div>";
+    } else {
+      const geo = p.geo ? '<p class="small muted">' + icon("pin", ' style="width:14px;height:14px;vertical-align:-2px"') + " Site location set " + fmtDay(p.geo.at.slice(0, 10)) + " (±" + Math.round(p.geo.acc) + " m). Photos are checked against it." + (edit ? ' <button class="link-btn small" data-action="plan-geo" data-id="' + p.id + '">Set again</button>' : "") + "</p>" :
+        edit ? '<div class="report">' + icon("pin") + '<div><b>Site location not set.</b> Stand at the site and tap the button, so photos can be checked against it.</div><button class="btn btn-sm" data-action="plan-geo" data-id="' + p.id + '">Set site location here</button></div>' : "";
+      body = (p.parts.length ? '<div class="card"><div class="bp-total"><span class="num">' + Math.round(partsPct(p, p.parts) * 100) + '%</span><span class="muted small">built, weighted by size</span></div><div class="bp-types">' + typeBars(p, p.parts) + "</div></div>" : "") +
+        pendingList(p) + geo +
+        (floorParts.length || edit ? '<div class="row-between wrap mt-16" style="gap:8px">' + planLegend() + zoomBtns + "</div>" + planBoard(p, pl, { pick: "part-open" }) : "") +
+        (p.parts.length ? "" : '<div class="card mt-16">' + empty("No parts traced yet.", edit ? '<br><button class="btn btn-primary" data-action="plan-mode" data-pid="' + p.id + '" data-m="parts">Trace parts</button>' : "") + "</div>") +
+        (floorParts.length ? PART_ORDER.map((t) => { const l = floorParts.filter((x) => x.type === t); return l.length ? fold("bp-" + p.id + "-" + t, ptype(t).plural + " · " + Math.round(partsPct(p, l) * 100) + "%", l.filter((x) => partPct(x) >= 100).length + " of " + l.length + " done", "", partList(p, l)) : ""; }).join("") : "");
+    }
+    return head + floors + seg + body;
+  }
+  function partList(p, list) {
+    return '<div class="list">' + list.map((x) => {
+      const pct = partPct(x), last = (x.log || []).filter(counts).slice(-1)[0], pend = partPending(x);
+      return '<button class="li li-btn" data-action="part-open" data-id="' + x.id + '"><span class="bp-sw" style="background:' + stageColor(pct) + '"></span><span class="li-main"><span class="li-title">' + esc(x.name) + '</span><span class="li-sub">' + esc(partSub(p, x)) + (last ? " · photo " + fmtDay(last.date) : "") + "</span></span>" +
+        (pend ? chip("Waiting", "warn") : "") + '<span class="num small">' + pct + "%</span></button>";
+    }).join("") + "</div>";
+  }
+
+  /* photo for a progress check: camera only on phones; keeps the file's time for the freshness rule */
+  function takeProgressPhoto() {
+    return new Promise((resolve) => {
+      const inp = document.createElement("input");
+      inp.type = "file"; inp.accept = "image/*";
+      if ("ontouchstart" in window) inp.setAttribute("capture", "environment");
+      inp.onchange = async () => {
+        const f = inp.files && inp.files[0]; if (!f) return resolve(null);
+        let exif = null;
+        try { exif = window.PhotoCheck.exifDate(await f.slice(0, 131072).arrayBuffer()); } catch (e) { /* none */ }
+        const photo = await compress(f, 1280).catch(() => null);
+        resolve(photo ? { photo, taken: f.lastModified || Date.now(), exif: exif ? exif.getTime() : null } : null);
+      };
+      inp.click();
+    });
+  }
+  // demo (laptop): a drawn photo of the part at the chosen stage, so the checks can be tried
+  function demoProgressPhoto(type, stage) {
+    const c = document.createElement("canvas"); c.width = 960; c.height = 720;
+    const g = c.getContext("2d");
+    g.fillStyle = "#C9CDD0"; g.fillRect(0, 0, 960, 720);
+    if (type === "wall") {
+      if (stage <= 1) { g.fillStyle = "#7F878D"; g.fillRect(0, 0, 820, 600); for (let r = 0; r < 16; r++) for (let k = -1; k < 8; k++) { const v = 130 + ((r * 7 + k * 13) % 40); g.fillStyle = "rgb(" + v + "," + v + "," + (v - 4) + ")"; g.fillRect(k * 120 + (r % 2) * 60 + 4, r * 38 + 4, 112, 30); } }
+      else { g.fillStyle = stage === 2 ? "#C8C6C1" : "#EFEADF"; g.fillRect(0, 0, 820, 600); }
+    } else if (type === "pipe") {
+      g.fillStyle = "#8C8072"; g.fillRect(0, 380, 960, 340); g.fillStyle = stage >= 3 ? "#7D7266" : stage === 2 ? "#3563C4" : "#9AA3AA"; g.fillRect(0, 470, 960, 60);
+    } else {
+      g.fillStyle = stage === 1 ? "#A47E52" : "#A8AFB4"; g.fillRect(380, 0, 200, 600);
+    }
+    g.fillStyle = "#77706A"; g.fillRect(0, 600, 960, 120); g.fillStyle = "#555"; g.fillRect(820, 0, 6, 600);
+    const d = g.getImageData(0, 0, 960, 720), a = d.data;
+    for (let i = 0; i < a.length; i += 4) { const n = (Math.random() - 0.5) * 18; a[i] += n; a[i + 1] += n; a[i + 2] += n; }
+    g.putImageData(d, 0, 0);
+    return c.toDataURL("image/jpeg", 0.85);
+  }
+
+  // all checks for a progress photo; hard ones block saving, soft ones send it to management
+  function progressChecks(p, part, s) {
+    const out = [], sh = s.shot; if (!sh) return out;
+    const m = sh.metrics || {};
+    const cur = partStage(part), tgt = s.dir === "back" ? cur - 1 : cur + 1;
+    const age = Date.now() - (sh.exif || sh.taken);
+    out.push(age > FRESH_MIN * 60000 ? { level: "hard", text: "Taken " + ago(age) + " ago. Take a new photo with the camera, now." } : { level: "ok", text: "Taken just now with the camera" });
+    if (m.lum < 40) out.push({ level: "hard", text: "Too dark. Turn on a light or use the flash, and retake." });
+    else if (m.lum > 245) out.push({ level: "hard", text: "Too bright (washed out). Retake out of direct sun." });
+    else out.push({ level: "ok", text: "Bright enough" });
+    out.push(m.sharp < 50 ? { level: "hard", text: "Too blurry. Hold the phone still and retake." } : { level: "ok", text: "Sharp" });
+    let reuse = null;
+    S.projects.forEach((pp) => (pp.parts || []).forEach((x) => (x.log || []).forEach((e) => { if (!reuse && e.hash && window.PhotoCheck.hamming(e.hash, m.hash) <= 6) reuse = [x, e]; })));
+    out.push(reuse ? { level: "hard", text: "Same photo as " + reuse[0].name + " on " + fmtDay(reuse[1].date) + ". Take a new one." } : { level: "ok", text: "Not a photo used before" });
+    // location
+    if (!p.geo) out.push({ level: "info", text: "Site location not set yet, so the place cannot be checked." });
+    else if (s.geo) {
+      const dd = distM(p.geo, s.geo), lim = (S.settings.geofenceM || 200) + Math.min(100, s.geo.acc || 0);
+      out.push(dd > lim ? { level: "soft", text: "Taken " + (dd >= 1000 ? (dd / 1000).toFixed(1) + " km" : Math.round(dd) + " m") + " from the site." } : { level: "ok", text: "At the site (" + Math.round(dd) + " m away)" });
+    } else out.push({ level: "soft", text: s.geoErr ? "Location not available (" + s.geoErr + ")." : "Finding your location…", wait: !s.geoErr });
+    // colour rules (walls): plaster and paint make a wall lighter and smoother than bare blocks
+    if (part.type === "wall" && s.dir !== "back" && tgt >= 2) {
+      const prev = (part.log || []).filter((e) => counts(e) && e.metrics).slice(-1)[0];
+      const n = ptype("wall").stages.length;
+      if (prev && m.lc < prev.metrics.lc - 30) out.push({ level: "soft", text: "Looks darker than the last photo of this wall. Plaster and paint usually make it lighter." });
+      else if (tgt >= n - 1 && m.lc < 110 && m.sat < 0.12) out.push({ level: "soft", text: "Looks grey like bare blockwork or cement, not paint." });
+      else out.push({ level: "ok", text: "Colour fits the stage" });
+    }
+    // big jumps wait for management
+    if (s.dir !== "back") {
+      if (stagePct(part, tgt) >= 100) out.push({ level: "soft", text: part.name + " would be complete (100%). Management approves this." });
+      else {
+        const all = p.parts || [], tw = all.reduce((t, x) => t + partWeight(p, x), 0) || 1, t0 = today();
+        let delta = (partWeight(p, part) * (stagePct(part, tgt) - stagePct(part, cur))) / tw;
+        all.forEach((x) => (x.log || []).forEach((e) => { if (e.date === t0 && e.status !== "rejected") delta += (partWeight(p, x) * (stagePct(x, e.stage) - stagePct(x, e.prevStage || 0))) / tw; }));
+        if (delta > (S.settings.bigJumpPct || 10)) out.push({ level: "soft", text: "More than " + (S.settings.bigJumpPct || 10) + "% of the project in one day. Management approves this." });
+      }
+    }
+    return out;
   }
 
   /* ---------- Projects ---------- */
@@ -1427,6 +1763,7 @@
       '<div class="card"><div class="card-head"><h2 class="card-title">Work phases</h2><span class="muted small">' + p.phases.filter((x) => x.done).length + " of " + p.phases.length + " done</span></div>" + phasesHTML(p) + "</div></div></div>" +
       '<div class="section">' + tiles("project", [
         { id: "cal", icon: "calendar", label: "Calendar", title: "Calendar, " + esc(p.name), body: () => projCalendar(p) },
+        { id: "bp", icon: "image", label: "Blueprint", count: (p.parts || []).length ? Math.round(partsPct(p, p.parts) * 100) + "%" : "", warn: (p.parts || []).some((x) => partPending(x)), title: "Blueprint progress", body: () => blueprintSummary(p) },
         { id: "delays", icon: "hourglass", label: "Delays", count: p.delays.length, warn: lateDays(p) > 0, title: p.delays.length ? "Delays, " + plural(lateDays(p), "day") + " in total" : "Delays",
           body: () => (p.delays.length ? '<div class="list">' + p.delays.slice().reverse().map((d) => '<div class="li"><div class="li-main"><div class="li-title">+' + plural(d.days, "day") + ", " + esc(d.reason) + '</div><div class="li-sub">' + fmtDate(d.date) + (d.note ? ". " + esc(d.note) : "") + " Logged by " + esc(ROLE_LABEL[d.by] || d.by).toLowerCase() + ".</div></div></div>").join("") + "</div>" : empty("No delays logged.")) + (can.tick() ? '<button class="btn btn-soft mt-12" data-action="open-delay" data-id="' + p.id + '">' + icon("hourglass") + "Delay this job</button>" : "") },
         { id: "crews", icon: "users", label: "Crews", count: crewsAt(id, t).length, title: "Crews", body: () => myAsg.length ? '<div class="list">' + myAsg.map((a) => { const c = crew(a.crewId); return '<div class="li"><div class="li-main"><div class="li-title">' + esc(c ? c.name : "?") + ' <span class="muted small">' + esc(c ? c.trade : "") + '</span></div><div class="li-sub">' + fmtDate(a.from) + " to " + fmtDate(a.to) + "</div></div>" + (a.from <= t && a.to >= t ? chip("Here now", "good") : a.from > t ? chip("Coming", "info") : chip("Finished", "")) + "</div>"; }).join("") + "</div>" : empty("No crews booked.") },
@@ -1962,6 +2299,13 @@
   }
 
   /* ---------- Settings ---------- */
+  function stagesCard(dis) {
+    const phaseNames = ["Site clearing & piling", "Foundation & ground slab", "Steel structure", "Roofing & wall cladding", "M&E (electrical, plumbing, fire)", "Finishing & handover"];
+    return '<div class="card mt-16"><h2 class="card-title">Blueprint stages</h2><p class="small muted">What each stage of a part is worth. A progress photo moves a part one stage at a time.</p>' +
+      PART_ORDER.map((t) => { const pt = S.settings.partTypes[t]; return '<div class="bp-stagecfg"><div class="row-between wrap"><b>' + esc(pt.plural) + '</b><label class="small">Counts towards <select class="input input-sm" data-change="partPhase" data-t="' + t + '"' + dis + ">" + phaseNames.map((n, i) => '<option value="' + i + '"' + (pt.phase === i ? " selected" : "") + ">" + esc(n) + "</option>").join("") + "</select></label></div>" +
+        pt.stages.map((st, i) => '<div class="bp-stagerow"><input class="input" data-change="stage" data-t="' + t + '" data-i="' + i + '" data-k="name" value="' + esc(st[0]) + '"' + dis + '><input class="input" type="number" min="0" max="100" data-change="stage" data-t="' + t + '" data-i="' + i + '" data-k="pct" value="' + st[1] + '"' + (i === 0 ? " disabled" : dis) + '><span class="muted">%</span></div>').join("") + "</div>"; }).join("") +
+      '<label class="field mt-12"><span>Management approves when one day adds more than (% of the project)</span><input class="input" type="number" min="1" max="100" data-setting="bigJumpPct" value="' + S.settings.bigJumpPct + '"' + dis + "></label></div>";
+  }
   function viewSettings() {
     const s = S.settings;
     const dis = can.manage() ? "" : " disabled";
@@ -1982,7 +2326,8 @@
       '<div class="card"><h2 class="card-title">Saved reject reasons</h2><div class="list mt-8">' + (s.rejectReasons || []).map((x, i) => '<div class="li"><div class="li-main">' + esc(x) + "</div>" + (can.manage() || can.approve() ? '<button class="icon-btn sm" data-action="reason-del" data-i="' + i + '" aria-label="Remove reason">' + icon("trash") + "</button>" : "") + "</div>").join("") + "</div>" +
         (can.manage() || can.approve() ? '<div class="row mt-12" style="gap:8px"><input class="input" data-input-reason placeholder="Add a reason"><button class="btn" data-action="reason-add">' + icon("plus") + "Add</button></div>" : "") + "</div>" +
       '<div class="card"><h2 class="card-title">Data on this device</h2><p class="small muted mt-8">This prototype saves everything in this browser only. Nothing is sent to a server.</p>' +
-      '<div class="row wrap mt-16"><button class="btn btn-soft" data-action="reset-sample">' + icon("refresh") + 'Reload sample data</button><button class="btn btn-danger" data-action="wipe">' + icon("trash") + "Clear everything</button></div></div></div></div>";
+      '<div class="row wrap mt-16"><button class="btn btn-soft" data-action="reset-sample">' + icon("refresh") + 'Reload sample data</button><button class="btn btn-danger" data-action="wipe">' + icon("trash") + "Clear everything</button></div></div></div></div>" +
+      stagesCard(dis);
   }
 
   /* ======================================================================
@@ -2036,6 +2381,9 @@
         const w = worker(n.workerId), name = w ? esc(w.name) : "A worker", site = project(n.projectId) ? esc(project(n.projectId).name) : "";
         if (n.type === "selfie-in") return "<b>" + name + "</b> clocked in with a selfie at " + n.time + (site ? ", " + site : "");
         if (n.type === "selfie-out") return "<b>" + name + "</b> clocked out with a selfie at " + n.time + (site ? ", " + site : "");
+        if (n.type === "progress") return "<b>" + esc(n.by || "Site manager") + "</b>: " + esc(n.text || "") + " needs your approval" + (site ? ", " + site : "");
+        if (n.type === "progress-ok") return "<b>Approved</b>: " + esc(n.text || "") + (site ? ", " + site : "");
+        if (n.type === "progress-back") return "<b>Sent back</b>: " + esc(n.text || "") + (n.reason ? ". “" + esc(n.reason) + "”" : "");
         if (n.type === "face") return n.text === "diff" ? "<b>" + name + "</b>: clock-in and clock-out selfies look like different people" + (n.forDate && n.forDate !== today() ? " (" + fmtDay(n.forDate) + ")" : "") : "<b>" + name + "</b>: no face in the clock-" + (n.side === "in" ? "in" : "out") + " selfie";
         if (n.type === "report") return "<b>" + name + "</b> reported: " + esc(n.text || "") + (n.forDate ? " (" + fmtDay(n.forDate) + ")" : "");
         if (n.type === "confirmed") return W_ ? "<b>" + tr("confirmed") + "</b> " + n.time : "<b>" + name + "</b> confirmed at " + n.time;
@@ -2078,6 +2426,93 @@
         '<button class="w-big mt-16" data-action="w-photo"' + (away ? " disabled" : "") + ">" + icon("camera") + "<span>" + tr("takePhoto") + "</span></button>" +
         '<p class="small muted mt-16" style="text-align:center">Demo: the location check is pretend. <button class="link-btn small" data-action="w-away">' + (away ? "Pretend I am at the site" : "Pretend I am not at the site") + "</button></p>";
     },
+    planpage(s) {
+      return sheetHead("Which page is the floor plan?") + '<p class="muted">This PDF has ' + s.pages + " pages.</p>" +
+        '<div class="choice-row">' + Array.from({ length: Math.min(30, s.pages) }, (_, i) => '<button class="choice" data-action="plan-page" data-n="' + (i + 1) + '">Page ' + (i + 1) + "</button>").join("") + "</div>" + (s.busy ? '<p class="small muted mt-8">Opening page…</p>' : "");
+    },
+    plannew(s) {
+      const p = project(s.pid), n = (p.plans || []).length;
+      const names = ["Ground floor", "Level 1", "Level 2", "Mezzanine", "Roof"];
+      return sheetHead("New floor") + '<img class="bp-preview" src="' + s.img + '" alt="Blueprint">' +
+        '<div class="field"><span>Which floor is this?</span>' + choiceRow("name", names, val("name", names[Math.min(n, 2)])) + "</div>" +
+        '<label class="field"><span>Or type a name</span><input class="input" data-f="custom" value="' + esc(val("custom", "")) + '" placeholder="e.g. Office block, Level 1"></label>' +
+        '<label class="field"><span>Floor height (m), for the 3D model</span><input class="input" type="number" step="0.5" min="2" data-f="height" value="' + esc(val("height", p.type === "warehouse" ? "8" : "6")) + '"></label>' +
+        errBox() + '<div class="sheet-foot"><button class="btn btn-primary btn-big" data-action="plan-save">' + icon("check") + "Save, then trace parts</button></div>";
+    },
+    planscale(s) {
+      return sheetHead("Set the scale") + '<p class="muted">You drew a line of ' + Math.round(s.px) + " px on the blueprint. How long is it in real life?</p>" +
+        '<label class="field"><span>Real length (metres)</span><input class="input" type="number" step="0.01" min="0.1" data-f="m" value="' + esc(val("m", "")) + '" autofocus placeholder="e.g. 6.00"></label>' +
+        errBox() + '<div class="sheet-foot"><button class="btn btn-primary btn-big" data-action="plan-scale-save">' + icon("check") + "Save scale</button></div>";
+    },
+    part(s) {
+      const p = project(s.pid), x = p && (p.parts || []).find((y) => y.id === s.id);
+      if (!x) return sheetHead("Part");
+      const t = ptype(x.type), cur = partStage(x), pend = partPending(x), pl = planOf(p, x);
+      const reached = (i) => (x.log || []).find((e) => counts(e) && e.stage === i);
+      const ladder = '<div class="bp-ladder">' + t.stages.map((st, i) => {
+        const r = reached(i), isPend = pend && pend.stage === i;
+        return '<div class="bp-step' + (i <= cur ? " on" : "") + (i === cur ? " now" : "") + '"><span class="bp-dot">' + (i <= cur && i ? icon("check") : "") + "</span><span><b>" + esc(st[0]) + '</b> <span class="muted small">' + st[1] + "%</span>" +
+          (r ? '<small class="muted">' + fmtDay(r.date) + ", " + esc(r.by) + "</small>" : isPend ? '<small class="warn-text">Waiting for management</small>' : "") + "</span></div>";
+      }).join("") + "</div>";
+      const photos = (x.log || []).slice().reverse().map((e) => '<div class="bp-photo">' + img(e.photo, "", x.name + " " + stageName(x, e.stage)) +
+        '<div><b>' + esc(stageName(x, e.stage)) + '</b><div class="small muted">' + fmtDay(e.date) + " " + esc(e.time || "") + ", " + esc(e.by) + "</div>" +
+        (e.status === "pending" ? chip("Waiting for approval", "warn") : e.status === "rejected" ? chip("Sent back" + (e.rejectReason ? ": " + e.rejectReason : ""), "bad") : e.status === "approved" ? chip("Approved by " + (e.approvedBy || "management"), "good") : chip("Counted", "good")) +
+        (e.reason ? '<div class="small">Reason: “' + esc(e.reason) + "”</div>" : "") +
+        (e.flags || []).map((f) => '<div class="bp-flag">' + icon("alert") + "<span>" + esc(f) + "</span></div>").join("") + "</div></div>").join("");
+      const edit = can.tick();
+      return sheetHead(esc(x.name)) +
+        '<p class="muted">' + esc(t.label) + (pl ? " · " + esc(pl.name) : "") + (x.type !== "column" ? " · " + metres(partLen(p, x)) : "") + " · counts towards “" + esc((p.phases[t.phase] || {}).name || "") + "”</p>" +
+        '<div class="bp-big"><span class="num">' + partPct(x) + '%</span><span class="muted">' + esc(stageName(x, cur)) + "</span></div>" + ladder +
+        (edit ? '<div class="sheet-foot" style="margin-top:4px"><button class="btn btn-primary btn-big" data-action="open-progress" data-id="' + p.id + '" data-part="' + x.id + '">' + icon("camera") + "Take progress photo</button></div>" : "") +
+        '<h3 class="bp-h3">Photos</h3>' + (photos || empty("No photos yet.")) +
+        (edit ? '<details class="fold mt-16"><summary><div class="grow"><div class="fold-title">Rename or delete</div></div><span class="chev">' + icon("down") + '</span></summary><div class="fold-body">' +
+          '<label class="field"><span>Name</span><input class="input" data-f="pname" value="' + esc(val("pname", x.name)) + '"></label><div class="row wrap" style="gap:8px"><button class="btn btn-sm btn-primary" data-action="part-rename">Save name</button>' +
+          '<button class="btn btn-sm btn-danger" data-action="part-del">' + icon("trash") + (s.confirmDel ? "Tap again to delete " + esc(x.name) : "Delete this part") + "</button></div></div></details>" : "");
+    },
+    progress(s) {
+      const p = project(s.pid);
+      const withParts = S.projects.filter((q) => (q.parts || []).length);
+      const projSel = role() === "boss" && withParts.length > 1 ? '<label class="field"><span>Project</span><select class="input" data-change="progProject">' + withParts.map((q) => '<option value="' + q.id + '"' + (q.id === s.pid ? " selected" : "") + ">" + esc(q.name) + "</option>").join("") + "</select></label>" : "";
+      if (!p || !(p.parts || []).length) return sheetHead("Progress photo") + projSel + empty("Trace the parts on this project's blueprint first.");
+      const part = p.parts.find((x) => x.id === val("partId")) || null;
+      const plans = p.plans.slice().sort((a, b) => a.level - b.level);
+      const opts = plans.map((pl) => PART_ORDER.map((t) => {
+        const l = p.parts.filter((x) => x.planId === pl.id && x.type === t); if (!l.length) return "";
+        return '<optgroup label="' + esc(ptype(t).plural + (plans.length > 1 ? ", " + pl.name : "")) + '">' + l.map((x) => '<option value="' + x.id + '"' + (part && part.id === x.id ? " selected" : "") + ">" + esc(x.name + " · " + partSub(p, x)) + "</option>").join("") + "</optgroup>";
+      }).join("")).join("");
+      let h = sheetHead("Progress photo") + projSel +
+        '<label class="field"><span>Which part are you photographing?</span><select class="input" data-f="partId" data-rerender="1"><option value="">Choose a wall, pipe or column…</option>' + opts + "</select></label>";
+      const pl = part ? planOf(p, part) : plans[0];
+      if (pl) h += planBoard(p, pl, { mini: true, highlight: part && part.id, pick: "prog-pick" }) + '<p class="small muted" style="margin-top:6px">' + (part ? "The highlighted part is the one you chose. Check it is right." : "Or tap the part on the plan.") + "</p>";
+      if (!part) return h;
+      const cur = partStage(part), n = ptype(part.type).stages.length, pend = partPending(part);
+      h += '<div class="bp-now">Now: <b>' + esc(stageName(part, cur)) + "</b> (" + stagePct(part, cur) + "%)</div>";
+      if (pend) return h + '<div class="report">' + icon("clock") + "<div>A photo for <b>" + esc(stageName(part, pend.stage)) + "</b> is waiting for management. You can add the next one after it is approved or sent back.</div></div>";
+      const dirs = [];
+      if (cur < n - 1) dirs.push(["next", "Next: " + stageName(part, cur + 1) + " (" + stagePct(part, cur + 1) + "%)"]);
+      if (cur > 0) dirs.push(["back", "Go back to: " + stageName(part, cur - 1)]);
+      const dir = val("dir", dirs[0][0]); if (!F().dir) F().dir = dir; s.dir = dir;
+      h += '<div class="field"><span>What does the photo show?</span><div class="choice-row">' + dirs.map(([k, l]) => '<button type="button" class="choice ' + (dir === k ? "on" : "") + '" data-action="pick" data-k="dir" data-v="' + k + '">' + esc(l) + "</button>").join("") + "</div>" +
+        (cur < n - 1 ? '<small class="muted">One stage at a time. ' + esc(stageName(part, Math.min(n - 1, cur + 2))) + (cur + 2 <= n - 1 ? " comes after " + esc(stageName(part, cur + 1)) + "." : "") + "</small>" : "") + "</div>";
+      if (dir === "back") h += '<label class="field"><span>Why is it going back? (needed)</span><textarea class="input" data-f="reason">' + esc(val("reason", "")) + "</textarea></label>";
+      if (!s.shot) {
+        h += '<button class="w-big mt-8" data-action="prog-photo">' + icon("camera") + "<span>Take photo</span></button>" + (s.busy ? '<p class="small muted mt-8">Checking the photo…</p>' : "") +
+          (!("ontouchstart" in window) ? '<p class="small muted mt-8" style="text-align:center">On a laptop: <button class="link-btn small" data-action="prog-demo">use a demo photo</button> to try the checks.</p>' : "");
+        return h + errBox();
+      }
+      const ck = progressChecks(p, part, s), hard = ck.some((c) => c.level === "hard"), soft = ck.filter((c) => c.level === "soft" && !c.wait);
+      h += '<img class="clock-preview" src="' + s.shot.photo + '" alt="Progress photo">' +
+        '<div class="bp-checks">' + ck.map((c) => '<div class="bp-check ' + c.level + '">' + icon(c.level === "ok" ? "check" : c.level === "info" ? "pin" : c.level === "hard" ? "x" : "alert") + "<span>" + esc(c.text) + "</span></div>").join("") + "</div>" +
+        (hard ? '<p class="small warn-text">Fix the red item' + (ck.filter((c) => c.level === "hard").length > 1 ? "s" : "") + " and take the photo again.</p>" : soft.length ? '<p class="small">This photo will be saved and sent to management to approve before it counts.</p>' : "") +
+        errBox() + '<div class="sheet-foot"><button class="btn btn-soft btn-big" data-action="prog-photo">Retake</button><button class="btn btn-primary btn-big" data-action="prog-save"' + (hard ? " disabled" : "") + ">" + icon("check") + (soft.length ? "Send for approval" : "Save") + "</button></div>";
+      return h;
+    },
+    progreject(s) {
+      const reasons = ["Wrong part", "Work not finished", "Photo not clear", "Not at this site"];
+      return sheetHead("Send back") + '<div class="field"><span>Why?</span>' + choiceRow("reason", reasons, val("reason", "")) + "</div>" +
+        '<label class="field"><span>Note (optional)</span><textarea class="input" data-f="note">' + esc(val("note", "")) + "</textarea></label>" +
+        errBox() + '<div class="sheet-foot"><button class="btn btn-danger btn-big" data-action="prog-reject-save">' + icon("x") + "Send back</button></div>";
+    },
     phase(s) {
       const p = project(s.id), ph = p && p.phases.find((x) => x.id === s.ph);
       if (!ph) return sheetHead("Phase");
@@ -2094,6 +2529,7 @@
       return back + sheetHead(esc(ph.name)) +
         '<div class="ph-facts"><div><span class="muted">Planned</span><b>' + fmtShort(ph.planStart) + " – " + fmtShort(ph.planEnd) + "</b><small>" + daysTxt(inf.len) + "</small></div>" +
         '<div><span class="muted">Actual</span><b>' + esc(actual) + "</b><small>" + chip(inf.label, inf.cls) + "</small></div></div>" +
+        (phasePartsPct(p, i) != null ? '<p class="small">Blueprint: <b>' + Math.round(phasePartsPct(p, i) * 100) + "% built</b> (" + phaseParts(p, i).filter((x) => partPct(x) >= 100).length + " of " + phaseParts(p, i).length + ' parts done). <button class="link-btn small" data-action="plan-open" data-id="' + p.id + '">Open blueprint</button></p>' : "") +
         (main ? '<div class="sheet-foot" style="margin-top:4px">' + main + "</div>" : "") +
         (ph.done ? '<p class="small mt-8"><button class="link-btn small" data-action="phase-reopen" data-ph="' + ph.id + '">Not finished after all</button></p>' : "") +
         (!editing ? '<p class="mt-16"><button class="btn btn-soft" data-action="phase-edit">' + icon("edit") + "Change dates</button></p>" :
@@ -2122,6 +2558,7 @@
         tile("open-receipt", "receipt", "Receipt or cash", "Snap it, type the amount") +
         tile("open-material", "truck", "Material in / out", "Delivery or used on site") +
         tile("open-delay", "hourglass", "Delay a job", "Rain, late material…") +
+        tile("open-progress", "image", "Progress photo", "A wall, pipe or column") +
         "</div>";
     },
 
@@ -2398,6 +2835,7 @@
       const n = S.notifications.find((x) => x.id === el.dataset.id); if (!n) return;
       n.read = true; save(); closeSheet();
       if (role() === "worker") { render(); return; }
+      if (/^progress/.test(n.type)) { ui.planMode = ui.planMode || {}; ui.planMode[n.projectId] = "progress"; location.hash = "#/plan/" + n.projectId; return; }
       ui.attSite = n.projectId; ui.attDate = n.forDate || n.date; ui.attPicked = true;
       const r = S.attendance.find((a) => a.workerId === n.workerId && a.date === ui.attDate);
       ui.attFilter = n.type === "report" ? "all" : r && isTodo(r) ? "todo" : "all";
@@ -2625,6 +3063,177 @@
     "stock-clear"() { ui.stockQ = ""; render(); const n = $('[data-input="stockQ"]'); if (n) n.focus(); },
 
     /* projects */
+    /* blueprint */
+    "plan-open"(el) { closeSheet(); location.hash = "#/plan/" + el.dataset.id; },
+    "plan-floor"(el) { ui.planFloor = ui.planFloor || {}; ui.planFloor[el.dataset.pid] = el.dataset.id; ui.planStart = null; render(); },
+    "plan-mode"(el) { ui.planMode = ui.planMode || {}; ui.planMode[el.dataset.pid] = el.dataset.m; ui.planStart = null; render(); },
+    "plan-tool"(el) { ui.planTool = el.dataset.t; ui.planStart = null; render(); },
+    "plan-stop"() { ui.planStart = null; render(); },
+    "plan-zoom"(el) { const z = [1, 1.5, 2, 3], i = Math.max(0, Math.min(z.length - 1, z.indexOf(ui.planZoom || 1) + +el.dataset.z)); ui.planZoom = z[i]; render(); },
+    "plan-upload"(el) {
+      const pid = el.dataset.id, inp = document.createElement("input");
+      inp.type = "file"; inp.accept = "image/*,application/pdf,.pdf";
+      inp.onchange = async () => {
+        const f = inp.files && inp.files[0]; if (!f) return;
+        toast("Opening the blueprint…", "image");
+        try {
+          if (/pdf$/i.test(f.type) || /\.pdf$/i.test(f.name)) {
+            const pdf = await openPdf(f);
+            if (pdf.numPages > 1) { openSheet({ type: "planpage", pid, pages: pdf.numPages, pdf }); return; }
+            const r = await pdfPage(pdf, 1); openSheet({ type: "plannew", pid, img: r.url, w: r.w, h: r.h });
+          } else {
+            const url = await compress(f, 2400), im = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = url; });
+            openSheet({ type: "plannew", pid, img: url, w: im.naturalWidth, h: im.naturalHeight });
+          }
+        } catch (e) { toast("Could not open that file. Try a PDF, JPG or PNG.", "alert"); }
+      };
+      inp.click();
+    },
+    async "plan-page"(el) {
+      const s = ui.sheet; s.busy = true; renderSheet();
+      try { const r = await pdfPage(s.pdf, +el.dataset.n); openSheet({ type: "plannew", pid: s.pid, img: r.url, w: r.w, h: r.h }); }
+      catch (e) { s.busy = false; fail("Could not open that page."); }
+    },
+    async "plan-save"() {
+      const s = ui.sheet, f = F(), p = project(s.pid);
+      const name = (f.custom || "").trim() || val("name", ["Ground floor", "Level 1", "Level 2"][Math.min((p.plans || []).length, 2)]);
+      const height = parseFloat(val("height", "6")) || 6;
+      const ref = await storePhoto(s.img);
+      const pl = { id: uid("pl"), name, img: ref, w: s.w, h: s.h, scale: null, level: (p.plans || []).length, height };
+      p.plans.push(pl);
+      log("plan", { projectId: p.id, value: "added the blueprint for " + esc(name) + " (" + esc(p.name) + ")" });
+      ui.planFloor = ui.planFloor || {}; ui.planFloor[p.id] = pl.id; ui.planMode = ui.planMode || {}; ui.planMode[p.id] = "parts"; ui.planTool = "scale"; ui.planStart = null;
+      save(); closeSheet(); render(); toast("Blueprint saved. First set the scale: tap both ends of a dimension you know.");
+    },
+    "plan-tap"(el, e) {
+      const p = project(route().id), pl = p && p.plans.find((x) => x.id === el.dataset.plan); if (!pl) return;
+      const r = el.getBoundingClientRect(), k = pl.w / r.width;
+      let pt = [(e.clientX - r.left) * k, (e.clientY - r.top) * (pl.h / r.height)];
+      const tool = ui.planTool || "wall", snapR = 14 * k;
+      // snap to the ends of parts already traced
+      let best = null;
+      (p.parts || []).filter((x) => x.planId === pl.id).forEach((x) => [x.a, x.b].filter(Boolean).forEach((q) => { const d = Math.hypot(q[0] - pt[0], q[1] - pt[1]); if (d < snapR && (!best || d < best.d)) best = { d, q }; }));
+      if (best && tool !== "scale") pt = best.q.slice();
+      pt = [Math.round(pt[0] * 10) / 10, Math.round(pt[1] * 10) / 10];
+      if (tool === "column") { p.parts.push({ id: uid("pt"), planId: pl.id, type: "column", name: nextPartName(p, "column"), a: pt, b: null, log: [] }); save(); render(); return; }
+      if (!ui.planStart) { ui.planStart = pt; render(); return; }
+      let a = ui.planStart, b = pt;
+      // straighten lines within 6 degrees of horizontal or vertical
+      const ang = Math.abs((Math.atan2(b[1] - a[1], b[0] - a[0]) * 180) / Math.PI);
+      if (!best) { if (ang < 6 || ang > 174) b = [b[0], a[1]]; else if (Math.abs(ang - 90) < 6) b = [a[0], b[1]]; }
+      const px = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      if (px < 4 * k) { ui.planStart = null; render(); return; }   // tapped the same point again: stop
+      if (tool === "scale") { ui.planStart = null; openSheet({ type: "planscale", pid: p.id, plan: pl.id, px }); return; }
+      p.parts.push({ id: uid("pt"), planId: pl.id, type: tool, name: nextPartName(p, tool), a, b, log: [] });
+      ui.planStart = b;   // keep going from the end, like drawing an outline
+      save(); render();
+    },
+    "plan-scale-save"() {
+      const s = ui.sheet, m = parseFloat(F().m), p = project(s.pid), pl = p.plans.find((x) => x.id === s.plan);
+      if (!(m > 0)) return fail("Type the real length in metres.");
+      pl.scale = m / s.px;
+      log("plan", { projectId: p.id, value: "set the scale of " + esc(pl.name) + ": " + m + " m = " + Math.round(s.px) + " px (" + esc(p.name) + ")" });
+      ui.planTool = "wall"; save(); closeSheet(); render(); toast("Scale saved. Now trace the walls: tap one end, then the other.");
+    },
+    "plan-undo"(el) {
+      const p = project(el.dataset.pid), pl = p.plans.find((x) => x.id === (ui.planFloor || {})[p.id]) || p.plans.slice().sort((a, b) => a.level - b.level)[0];
+      const list = p.parts.filter((x) => x.planId === pl.id && !(x.log || []).length); if (!list.length) return toast("Parts with photos are not removed by Undo. Open the part to delete it.", "alert");
+      const last = list[list.length - 1]; p.parts.splice(p.parts.indexOf(last), 1);
+      ui.planStart = null; save(); render(); toast(esc(last.name) + " removed.");
+    },
+    "plan-del"(el) {
+      const p = project(el.dataset.pid), pl = p.plans.find((x) => x.id === el.dataset.id); if (!pl) return;
+      if (ui.planDelConfirm !== pl.id) { ui.planDelConfirm = pl.id; toast("Tap “Remove this floor” again to remove " + esc(pl.name) + " and its " + plural(p.parts.filter((x) => x.planId === pl.id).length, "part") + ".", "alert"); setTimeout(() => { ui.planDelConfirm = null; }, 6000); return; }
+      const snap = JSON.stringify({ projects: S.projects });
+      p.parts = p.parts.filter((x) => x.planId !== pl.id); p.plans.splice(p.plans.indexOf(pl), 1); p.plans.forEach((x, i) => { x.level = i; });
+      ui.planDelConfirm = null; ui.planFloor[p.id] = null;
+      done(esc(pl.name) + " removed.", snap, [log("plan", { projectId: p.id, value: "removed the blueprint floor " + esc(pl.name) + " (" + esc(p.name) + ")" })], "trash");
+    },
+    "plan-geo"(el) {
+      const p = project(el.dataset.id);
+      if (!navigator.geolocation) return toast("This phone cannot share its location.", "alert");
+      toast("Finding your location…", "pin");
+      navigator.geolocation.getCurrentPosition((pos) => {
+        p.geo = { lat: pos.coords.latitude, lng: pos.coords.longitude, acc: pos.coords.accuracy, at: new Date().toISOString() };
+        log("plan", { projectId: p.id, value: "set the site location of " + esc(p.name) + " (±" + Math.round(pos.coords.accuracy) + " m)" });
+        save(); render(); toast("Site location saved.");
+      }, (err) => toast("Could not get the location: " + esc(err.message || "permission denied") + ".", "alert"), { enableHighAccuracy: true, timeout: 15000 });
+    },
+    "part-open"(el) { openSheet({ type: "part", pid: route().name === "plan" ? route().id : (ui.sheet && ui.sheet.pid), id: el.dataset.id }); },
+    "part-rename"() {
+      const s = ui.sheet, p = project(s.pid), x = p.parts.find((y) => y.id === s.id), nm = (F().pname || "").trim();
+      if (!nm) return fail("Type a name.");
+      if (p.parts.some((y) => y !== x && y.name.toLowerCase() === nm.toLowerCase())) return fail("Another part already has that name.");
+      log("plan", { projectId: p.id, value: "renamed " + esc(x.name) + " to " + esc(nm) + " (" + esc(p.name) + ")" });
+      x.name = nm; save(); render(); renderSheet(); toast("Renamed.");
+    },
+    "part-del"() {
+      const s = ui.sheet, p = project(s.pid), x = p.parts.find((y) => y.id === s.id); if (!x) return;
+      if (!s.confirmDel) { s.confirmDel = true; renderSheet(); return; }
+      const snap = JSON.stringify({ projects: S.projects });
+      p.parts.splice(p.parts.indexOf(x), 1); closeSheet();
+      done(esc(x.name) + " deleted.", snap, [log("plan", { projectId: p.id, value: "deleted " + esc(x.name) + " (" + esc(p.name) + ")" })], "trash");
+    },
+    "open-progress"(el) {
+      let pid = el && el.dataset.id;
+      if (!pid) pid = role() === "site" ? siteId() : route().name === "plan" || route().name === "project" ? route().id : ((S.projects.find((q) => (q.parts || []).length) || {}).id);
+      const p = project(pid);
+      if (!p || !(p.parts || []).length) { closeSheet(); if (p) location.hash = "#/plan/" + p.id; return toast("Trace the walls, pipes and columns on the blueprint first.", "alert"); }
+      openSheet({ type: "progress", pid, f: { partId: (el && el.dataset.part) || "" } });
+      progGeo(ui.sheet);
+    },
+    "prog-pick"(el) { F().partId = el.dataset.id; F().dir = null; ui.sheet.shot = null; renderSheet(); },
+    async "prog-photo"() {
+      const s = ui.sheet, r = await takeProgressPhoto(); if (!r || ui.sheet !== s) return;
+      s.busy = true; renderSheet();
+      try { r.metrics = await window.PhotoCheck.analyse(r.photo); } catch (e) { r.metrics = { lum: 128, sharp: 999, hash: "" }; }
+      s.busy = false; s.shot = r; renderSheet();
+    },
+    async "prog-demo"() {
+      const s = ui.sheet, p = project(s.pid), part = p.parts.find((x) => x.id === F().partId); if (!part) return;
+      const stage = s.dir === "back" ? partStage(part) - 1 : partStage(part) + 1;
+      const photo = demoProgressPhoto(part.type, stage);
+      s.shot = { photo, taken: Date.now(), exif: null, demo: true, metrics: await window.PhotoCheck.analyse(photo) };
+      renderSheet();
+    },
+    async "prog-save"() {
+      const s = ui.sheet, p = project(s.pid), part = p.parts.find((x) => x.id === F().partId); if (!part || !s.shot) return;
+      if (s.dir === "back" && !(F().reason || "").trim()) return fail("Say why it is going back.");
+      const ck = progressChecks(p, part, s);
+      if (ck.some((c) => c.level === "hard")) return fail("The photo did not pass the checks.");
+      const flags = ck.filter((c) => c.level === "soft").map((c) => c.text);
+      const cur = partStage(part), stage = s.dir === "back" ? cur - 1 : cur + 1;
+      const snap = JSON.stringify({ projects: S.projects, notifications: S.notifications });
+      const ref = await storePhoto(s.shot.photo);
+      const by = actor().byName || ROLE_LABEL[role()];
+      const e = { id: uid("pg"), at: new Date().toISOString(), date: today(), time: nowHM(), stage, prevStage: cur, photo: ref, hash: s.shot.metrics.hash, metrics: { lum: s.shot.metrics.lum, sharp: s.shot.metrics.sharp, lc: s.shot.metrics.lc, sat: s.shot.metrics.sat, tex: s.shot.metrics.tex }, geo: s.geo || null, demo: !!s.shot.demo, flags, status: flags.length ? "pending" : "ok", by, reason: s.dir === "back" ? F().reason.trim() : "" };
+      part.log = part.log || []; part.log.push(e);
+      const what = part.name + " → " + stageName(part, stage) + " (" + stagePct(part, stage) + "%)";
+      if (flags.length) notify({ type: "progress", to: "boss", projectId: p.id, photo: ref, text: what, by, partId: part.id });
+      const a = log("progress", { projectId: p.id, value: "photographed " + esc(what) + " (" + esc(p.name) + ")" + (e.reason ? ". Reason: “" + esc(e.reason) + "”" : "") + (flags.length ? ". Sent for approval: " + esc(flags.join(" ")) : "") });
+      closeSheet();
+      done(flags.length ? esc(what) + " sent to management for approval." : esc(what) + " saved.", snap, [a], flags.length ? "clock" : "check");
+    },
+    "prog-approve"(el) {
+      const p = project(el.dataset.pid), x = p.parts.find((y) => y.id === el.dataset.part), e = x && x.log.find((y) => y.id === el.dataset.e); if (!e) return;
+      const snap = JSON.stringify({ projects: S.projects, notifications: S.notifications });
+      e.status = "approved"; e.approvedBy = actor().byName; e.approvedAt = new Date().toISOString();
+      const what = x.name + " → " + stageName(x, e.stage);
+      notify({ type: "progress-ok", to: "site", projectId: p.id, text: what, partId: x.id });
+      done("Approved: " + esc(what) + ".", snap, [log("progress", { projectId: p.id, value: "approved " + esc(what) + " (" + esc(p.name) + ")" })]);
+    },
+    "prog-reject"(el) { openSheet({ type: "progreject", pid: el.dataset.pid, part: el.dataset.part, e: el.dataset.e }); },
+    "prog-reject-save"() {
+      const s = ui.sheet, f = F(), p = project(s.pid), x = p.parts.find((y) => y.id === s.part), e = x && x.log.find((y) => y.id === s.e); if (!e) return;
+      if (!f.reason) return fail("Pick a reason.");
+      const snap = JSON.stringify({ projects: S.projects, notifications: S.notifications });
+      const reason = f.reason + ((f.note || "").trim() ? ": " + f.note.trim() : "");
+      e.status = "rejected"; e.rejectReason = reason; e.rejectedBy = actor().byName;
+      const what = x.name + " → " + stageName(x, e.stage);
+      notify({ type: "progress-back", to: "site", projectId: p.id, text: what, reason, partId: x.id });
+      closeSheet();
+      done("Sent back: " + esc(what) + ".", snap, [log("progress", { projectId: p.id, value: "sent back " + esc(what) + " (" + esc(p.name) + "). Reason: “" + esc(reason) + "”" })], "x");
+    },
     "phase-open"(el) {
       const back = ui.sheet && ui.sheet.type === "panel" ? { type: "panel", g: ui.sheet.g, t: ui.sheet.t } : null;
       openSheet({ type: "phase", id: el.dataset.id, ph: el.dataset.ph, back });
@@ -2632,7 +3241,10 @@
     "phase-back"() { const b = ui.sheet && ui.sheet.back; if (b) openSheet(b); else closeSheet(); },
     "phase-edit"() { ui.sheet.edit = !ui.sheet.edit; ui.sheet.f = {}; ui.sheet.err = ""; renderSheet(); },
     "phase-start"(el) { phaseSet(el.dataset.ph, (ph) => { ph.startedOn = today(); return "started"; }); },
-    "phase-finish"(el) { phaseSet(el.dataset.ph, (ph) => { ph.done = true; ph.doneOn = today(); if (!ph.startedOn) ph.startedOn = today(); return "finished"; }); },
+    "phase-finish"(el) {
+      const p = project(ui.sheet.id), ph = p && p.phases.find((x) => x.id === el.dataset.ph);
+      if (ph && unbuilt(p, ph)) return;
+      phaseSet(el.dataset.ph, (ph) => { ph.done = true; ph.doneOn = today(); if (!ph.startedOn) ph.startedOn = today(); return "finished"; }); },
     "phase-reopen"(el) { phaseSet(el.dataset.ph, (ph) => { ph.done = false; ph.doneOn = null; return "not finished after all"; }); },
     "phase-save"(el) {
       const s = ui.sheet, f = F(), p = project(s.id), ph = p.phases.find((x) => x.id === el.dataset.ph);
@@ -2655,6 +3267,7 @@
     },
     tick(el) {
       const p = project(el.dataset.id), ph = p && p.phases.find((x) => x.id === el.dataset.ph); if (!ph) return;
+      if (!ph.done && unbuilt(p, ph)) return;
       ph.done = !ph.done; ph.doneOn = ph.done ? today() : null;
       if (ph.done && !ph.startedOn) ph.startedOn = today();
       log("phase", { projectId: p.id, value: "marked “" + esc(ph.name) + "” " + (ph.done ? "as finished" : "as not finished") + " (" + esc(p.name) + ")" });
@@ -2882,6 +3495,16 @@
     if (c === "calProject") { ui.calProject = el.value; render(); }
     if (c === "attSite") { ui.attSite = el.value; ui.attDate = pickAttDate(el.value); ui.attFilter = null; render(); }
     if (c === "clockSite" && ui.sheet) { ui.sheet.siteId = el.value; renderSheet(); }
+    if (c === "progProject" && ui.sheet) { ui.sheet.pid = el.value; ui.sheet.f = {}; ui.sheet.shot = null; renderSheet(); }
+    if (c === "plan-meta") {
+      const pp = project(el.dataset.pid), pl = pp && pp.plans.find((x) => x.id === el.dataset.id);
+      if (pl) { if (el.dataset.k === "name") pl.name = el.value.trim() || pl.name; else { const v = parseFloat(el.value); if (v >= 2) pl.height = v; } save(); render(); toast("Saved."); }
+    }
+    if (c === "stage") {
+      const t = S.settings.partTypes[el.dataset.t], st = t && t.stages[+el.dataset.i];
+      if (st) { if (el.dataset.k === "name") st[0] = el.value.trim() || st[0]; else { const v = Math.round(parseFloat(el.value)); if (v >= 0 && v <= 100) st[1] = v; } save(); render(); toast("Saved."); }
+    }
+    if (c === "partPhase") { const t = S.settings.partTypes[el.dataset.t]; if (t) { t.phase = +el.value; save(); render(); toast("Saved."); } }
     if (el.dataset.setting) {
       const k = el.dataset.setting;
       if (k === "company") S.company.name = el.value.trim() || S.company.name;

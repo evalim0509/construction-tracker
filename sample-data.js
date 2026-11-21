@@ -37,6 +37,7 @@
     const D = (n) => addDays(now, n);
     const r = rnd(20261117);
     const pick = (arr) => arr[Math.floor(r() * arr.length)];
+    const pad2 = (x) => String(x).padStart(2, "0");
 
     const PHASES = ["Site clearing & piling", "Foundation & ground slab", "Steel structure", "Roofing & wall cladding", "M&E (electrical, plumbing, fire)", "Finishing & handover"];
     // slips: [days late starting, days late finishing] per phase; the app turns them into real dates against the plan
@@ -59,6 +60,26 @@
       { id: "p5", name: "Rawang Workshop", client: "Tekno Fabrication", location: "Rawang, Selangor", type: "factory",
         start: D(16), end: D(180), originalEnd: D(180), value: 1750000, phases: mkPhases("p5", 0), delays: [], color: "#B9832F" }
     ];
+
+    // blueprint for Shah Alam Factory: ground floor (1 px = 5 cm), traced walls, pipes and columns with photo history
+    (function () {
+      const p1 = projects[0], parts = [], pl = { id: "pl-p1-gf", name: "Ground floor", img: "demo-plan:p1-gf", w: 1200, h: 800, scale: 0.05, level: 0, height: 6 };
+      let n = 0;
+      const ent = (type, stage, daysAgo, status, flags) => ({ id: "pg" + (n++), at: D(-daysAgo) + "T10:15:00", date: D(-daysAgo), time: pad2(9 + (n % 7)) + ":" + pad2((n * 13) % 60), stage, prevStage: stage - 1, photo: "demo-prog:" + type + ":" + stage, status: status || "ok", by: "Faizal", flags: flags || [], demo: true });
+      const hist = (type, stage, days) => { const l = []; for (let s = 1; s <= stage; s++) l.push(ent(type, s, days[s - 1])); return l; };
+      const W = [[100, 100, 433, 100], [433, 100, 767, 100], [767, 100, 1100, 100], [1100, 100, 1100, 400], [1100, 400, 1100, 700], [1100, 700, 767, 700], [767, 700, 400, 700], [400, 700, 100, 700], [100, 700, 100, 400], [100, 400, 100, 100], [100, 460, 400, 460], [400, 460, 400, 700], [250, 460, 250, 700]];
+      const WS = [3, 3, 2, 2, 1, 1, 1, 2, 2, 3, 1, 1, 0];
+      W.forEach((w, i) => {
+        const log = hist("wall", WS[i], [26 - i, 14 - Math.floor(i / 2), 5 - Math.floor(i / 4)]);
+        if (i === 2) log.push(ent("wall", 3, 0, "pending", ["Looks darker than the last photo of this wall. Plaster and paint usually make it lighter.", "Wall 3 would be complete (100%). Management approves this."]));
+        parts.push({ id: "pt-w" + (i + 1), planId: pl.id, type: "wall", name: "Wall " + (i + 1), a: [w[0], w[1]], b: [w[2], w[3]], log });
+      });
+      const xs = [100, 300, 500, 700, 900, 1100], ys = [100, 400, 700], L = "ABCDEF";
+      ys.forEach((y, j) => xs.forEach((x, i) => parts.push({ id: "pt-c" + L[i] + (j + 1), planId: pl.id, type: "column", name: "Column " + L[i] + (j + 1), a: [x, y], b: null, log: hist("column", 3, [96 - i, 88 - i, 80 - i]) })));
+      [[[150, 150], [1050, 150], 1], [[1100, 640], [420, 640], 0], [[420, 640], [420, 480], 0], [[175, 700], [175, 770], 0]].forEach((q, i) =>
+        parts.push({ id: "pt-p" + (i + 1), planId: pl.id, type: "pipe", name: "Pipe " + (i + 1), a: q[0], b: q[1], log: hist("pipe", q[2], [3]) }));
+      p1.plans = [pl]; p1.parts = parts;
+    })();
 
     const crewDefs = [
       { id: "c1", name: "Crew A", trade: "Structure & concrete", names: ["Rahim Osman", "Mohd Hafiz", "Agus Santoso", "Budi Hartono", "Md. Karim Uddin", "Rafiqul Islam", "Suresh Kumar", "Ram Bahadur Thapa", "Tan Ah Kow", "Jamal Hossain"] },
