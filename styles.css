@@ -729,6 +729,73 @@ button.back { border: 0; background: none; padding: 0; cursor: pointer; font: in
 .ct-card { padding: 4px 18px 8px; }
 .ct-card .ct-row.named { padding: 14px 0; }
 
+
+/* ---------- Owner home (v0.6) ---------- */
+.todo { padding: 4px 20px; }
+.todo-row { display: flex; align-items: center; gap: 12px; padding: 14px 0; border-top: 1px solid var(--line); font-size: 15.5px; }
+.todo-row:first-child { border-top: 0; }
+.todo-row .btn { flex: none; min-width: 76px; }
+.todo-ok { display: flex; align-items: center; gap: 12px; color: var(--green); font-weight: 500; }
+.todo-ok svg { width: 22px; height: 22px; flex: none; }
+.money-line { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-top: 16px; padding: 16px 20px; border-radius: 8px; box-shadow: var(--shadow); text-decoration: none; color: var(--ink-2); font-size: 15px; }
+.money-line b { color: var(--ink); font-weight: 600; }
+.money-line:hover { background: var(--bg); }
+
+/* ---------- Month calendar with project bars ---------- */
+.cm { padding: 10px 12px 12px; overflow: visible; }
+.cm-dows { display: grid; grid-template-columns: repeat(7, 1fr); font-size: 12.5px; color: var(--muted); text-align: center; padding: 2px 0 8px; }
+.cm-week { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px 0; border-top: 1px solid var(--line); position: relative; }
+.cm-day { position: relative; border-left: 1px solid var(--line); padding: 4px 6px; cursor: pointer; outline-offset: -2px; min-height: 64px; }
+.cm-day:first-child { border-left: 0; }
+.cm-day:hover { background: var(--bg); }
+.cm-day.out { opacity: .45; }
+.cm-day.sun { background: repeating-linear-gradient(135deg, transparent 0 6px, #F5F7F8 6px 12px); }
+.cm-n { font-size: 13px; font-weight: 600; display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; }
+.cm-day.today .cm-n, .pc-day.today .cm-n { background: var(--ink); color: #fff; }
+.cm-truck { position: absolute; top: 6px; right: 6px; color: var(--blue); }
+.cm-truck svg { width: 14px; height: 14px; }
+.cm-truck.short { color: var(--amber); }
+.cm-free { position: absolute; left: 6px; bottom: 3px; font-size: 11.5px; color: var(--muted); }
+.cm-free.none { color: #8A5A1E; font-weight: 500; }
+.cm-bar { z-index: 2; margin: 0 3px; border-radius: 4px; padding: 0 7px; font-size: 12px; font-weight: 600; line-height: 22px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-decoration: none;
+  color: var(--ink); background: color-mix(in srgb, var(--c) 18%, #fff); box-shadow: inset 3px 0 0 var(--c); }
+.cm-bar:hover { background: color-mix(in srgb, var(--c) 30%, #fff); }
+/* hover list (laptops only; phones tap and get a pop-up) */
+.pop { display: none; position: absolute; top: calc(100% - 8px); left: 4px; z-index: 20; width: 300px; cursor: default; text-align: left;
+  background: var(--page); border-radius: 8px; padding: 12px 14px; box-shadow: 0 0 0 1px var(--line), 0 16px 40px -14px rgba(22,35,46,.35); font-size: 14px; color: var(--ink); }
+.pop.right { left: auto; right: 4px; }
+@media (hover: hover) and (min-width: 761px) {
+  .cm-day:hover > .pop, .pc-day:hover > .pop { display: block; }
+}
+.pop-title { font-weight: 600; margin-bottom: 6px; }
+.pop-sub { font-weight: 600; font-size: 13px; margin: 10px 0 4px; }
+.pop-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.pop-list li { display: block; line-height: 1.4; }
+.pop-list .dot, .pop-list .key { margin-right: 7px; vertical-align: 1px; }
+.pop-list a { color: var(--ink); font-weight: 600; }
+.pop-in-sheet { font-size: 15.5px; margin-top: -8px; }
+.pop-in-sheet .pop-title { font-size: 20px; margin-bottom: 10px; }
+
+/* ---------- Project calendar ---------- */
+.pc-grid { display: grid; grid-template-columns: repeat(7, 1fr); border-top: 1px solid var(--line); }
+.pc-day { position: relative; min-height: 74px; padding: 4px 6px 6px; border-left: 1px solid var(--line); border-bottom: 1px solid var(--line); cursor: pointer; }
+.pc-day:nth-child(7n+1) { border-left: 0; }
+.pc-day:hover { background: var(--bg); }
+.pc-day.out { opacity: .4; }
+.pc-day.off .crew-bar { opacity: .45; }
+.pc-day.sun { background: repeating-linear-gradient(135deg, transparent 0 6px, #F5F7F8 6px 12px); }
+.crew-bar { display: flex; height: 8px; border-radius: 4px; background: #fff; box-shadow: inset 0 0 0 1px #D5DBE0; overflow: hidden; margin-top: 8px; }
+.cb-here { background: var(--teal); }
+.cb-else { background: #AEB8C0; }
+.pc-num { display: block; font-size: 11.5px; color: var(--muted); margin-top: 3px; }
+.key { display: inline-block; width: 12px; height: 8px; border-radius: 2px; }
+.k-here { background: var(--teal); }
+.k-else { background: #AEB8C0; }
+.k-free { background: #fff; box-shadow: inset 0 0 0 1px #C5CDD3; }
+.pc-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12.5px; color: var(--ink-2); align-items: center; }
+.pc-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.pc-legend svg { width: 14px; height: 14px; color: var(--blue); }
+
 /* ---------- Bottom nav (phones) ---------- */
 .bottomnav { display: none; }
 .fab { display: none; }
@@ -799,6 +866,18 @@ button.back { border: 0; background: none; padding: 0; cursor: pointer; font: in
   .cal-month { min-width: 0; font-size: 18px; }
   .day-panel { margin-top: 0; }
   .mobile-only { display: flex !important; }
+  .cm { padding: 6px 4px 8px; margin: 0 -8px; }
+  .cm-day { padding: 2px 3px; min-height: 54px; }
+  .cm-n { width: 20px; height: 20px; font-size: 12px; }
+  .cm-free { font-size: 10px; left: 3px; }
+  .cm-truck { top: 4px; right: 3px; }
+  .cm-bar { margin: 0 1px; padding: 0 4px; font-size: 10.5px; line-height: 20px; }
+  .pc-day { min-height: 62px; padding: 2px 3px 4px; }
+  .pc-num { font-size: 10px; }
+  .todo { padding: 2px 14px; }
+  .todo-row { font-size: 15px; }
+  .money-line { flex-direction: column; align-items: flex-start; gap: 6px; }
+
   .ct-row.named { grid-template-columns: 1fr 1fr; }
   .ct-head.named > span:first-child { display: none; }
   .ct-row.named .ct-meta { grid-column: 1 / -1; flex-direction: row; align-items: center; margin-bottom: 6px; }

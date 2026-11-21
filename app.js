@@ -504,7 +504,7 @@
   };
 
   const TABS = [
-    { id: "today", label: "Today", icon: "today" },
+    { id: "today", label: "Home", icon: "today" },
     { id: "calendar", label: "Calendar", icon: "calendar" },
     { id: "projects", label: "Projects", icon: "projects" },
     { id: "stock", label: "Stock", icon: "stock" },
@@ -524,7 +524,7 @@
     const r = route(), t = tabOf(r);
     const isW = role() === "worker";
     document.body.classList.toggle("is-worker", isW);
-    const tabs = isW ? "" : TABS.map((x) => '<a href="#/' + x.id + '" class="' + (t === x.id ? "on" : "") + '"' + (t === x.id ? ' aria-current="page"' : "") + ">" + icon(x.icon) + "<span>" + x.label + "</span></a>").join("");
+    const tabs = isW ? "" : TABS.filter((x) => !(role() === "boss" && x.id === "stock")).map((x) => '<a href="#/' + x.id + '" class="' + (t === x.id ? "on" : "") + '"' + (t === x.id ? ' aria-current="page"' : "") + ">" + icon(x.icon) + "<span>" + x.label + "</span></a>").join("");
     top.innerHTML =
       '<a class="brand" href="#/today"><span class="brand-mark">' + icon("logo") + "</span><span>" + esc(S.company.name) + "<small>Site book</small></span></a>" +
       (isW ? "" : '<nav class="topnav" aria-label="Main">' + tabs + "</nav>") +
@@ -532,7 +532,7 @@
       '<div class="role-pick"><label for="rolePick">Viewing as</label><select id="rolePick" data-change="role">' +
       Object.keys(ROLE_LABEL).map((k) => '<option value="' + k + '"' + (S.role === k ? " selected" : "") + ">" + ROLE_LABEL[k] + "</option>").join("") +
       "</select></div>" +
-      (isW ? "" : '<button class="btn btn-primary log-btn log-btn-top" data-action="open-log">' + icon("plus") + "Log</button>") +
+      (isW ? "" : role() === "boss" ? "<span></span>" : '<button class="btn btn-primary log-btn log-btn-top" data-action="open-log">' + icon("plus") + "Log</button>") +
       (role() === "buyer" ? "" : '<button class="icon-btn bell-btn" data-action="open-notes" aria-label="Notifications' + (unreadCount() ? ", " + unreadCount() + " new" : "") + '">' + icon("bell") + (unreadCount() ? '<span class="bell-n">' + Math.min(99, unreadCount()) + "</span>" : "") + "</button>") +
       '<button class="icon-btn" data-action="menu" aria-label="More options" aria-expanded="' + ui.menu + '">' + icon("menu") + "</button>" +
       (ui.menu ? menuHTML() : "") +
@@ -549,6 +549,7 @@
     return '<div class="menu" role="menu">' +
       '<a href="#/attendance" role="menuitem">' + icon("clock") + "Check attendance</a>" +
       (role() === "boss" || role() === "site" ? '<a href="#/history" role="menuitem">' + icon("history") + 'History</a><a href="#/bin" role="menuitem">' + icon("bin") + "Rejected days</a>" : "") +
+      (role() === "boss" ? '<a href="#/stock" role="menuitem">' + icon("stock") + "Stock</a>" : "") +
       '<a href="#/team" role="menuitem">' + icon("users") + "Workers &amp; crews</a>" +
       '<a href="#/settings" role="menuitem">' + icon("sliders") + "Settings</a>" +
       "<hr>" +
@@ -574,6 +575,8 @@
       if (p) window.Factory3D.attach(el, { seed: p.id + p.name, progress: progress(p), type: p.type });
     });
     $$("details[data-fold]").forEach((d) => d.addEventListener("toggle", () => { d.open ? ui.open.add(d.dataset.fold) : ui.open.delete(d.dataset.fold); }));
+    if (ui.scrollToPanel) { ui.scrollToPanel = false; setTimeout(() => { const el = $(".tile-panel"); if (el) el.scrollIntoView({ block: "start" }); }, 60); }
+    if (ui.pendingPanel) { const pp = ui.pendingPanel; ui.pendingPanel = null; setTimeout(() => openSheet({ type: "panel", g: pp.g, t: pp.t }), 0); }
   }
 
   /* ---------- shared bits ---------- */
@@ -650,55 +653,34 @@
 
   function todayBoss() {
     const t = today(), mk = t.slice(0, 7);
-    const spent = spentInMonth(mk);
-    const expIn = expectedIn(30);
-    const low = lowStock();
-    const act = activeProjects();
-    const busiest = act.slice().sort((a, b) => crewsAt(b.id, t).length - crewsAt(a.id, t).length || progress(b) - progress(a))[0] || S.projects[0];
-    const receiptsCount = S.money.filter((m) => isOut(m) && m.status === "paid" && monthKey(m.date) === mk).length;
-
-    const attn = [];
+    const todo = [];
+    const overdue = S.money.filter((m) => isOut(m) && m.status === "expected" && m.date < t);
+    const week = billsDue(7).filter((m) => m.date >= t);
+    const pay = overdue.concat(week);
+    if (pay.length) todo.push({ cls: overdue.length ? "bad" : "warn", text: "Pay " + plural(pay.length, "bill") + ", " + RM(sum(pay, (m) => m.amount)) + (overdue.length ? ' <span class="muted">(' + overdue.length + " overdue)</span>" : ""), btn: "Pay", act: 'data-action="go-bills"' });
     S.projects.filter((p) => lateDays(p) > 0 && projectStatus(p).cls === "warn").forEach((p) => {
       const last = p.delays[p.delays.length - 1];
-      attn.push({ tag: "Late", cls: "warn", text: esc(p.name) + " is " + plural(lateDays(p), "day") + " behind" + (last ? ' <span class="muted">(' + esc(last.reason.toLowerCase()) + ")</span>" : ""), href: "#/project/" + p.id });
+      todo.push({ cls: "warn", text: esc(p.name) + " is " + plural(lateDays(p), "day") + " late" + (last ? ' <span class="muted">(' + esc(last.reason.toLowerCase()) + ")</span>" : ""), btn: "Open", act: 'href="#/project/' + p.id + '"' });
     });
-    const overdue = S.money.filter((m) => isOut(m) && m.status === "expected" && m.date < t);
-    if (overdue.length) attn.push({ tag: "Overdue", cls: "bad", text: plural(overdue.length, "bill") + " past due, " + RM(sum(overdue, (m) => m.amount)), href: "#/money" });
-    const week = billsDue(7).filter((m) => m.date >= t);
-    if (week.length) attn.push({ tag: "Pay", cls: "info", text: plural(week.length, "bill") + " due this week, " + RM(sum(week, (m) => m.amount)), href: "#/money" });
     const urgentBuy = S.needs.filter((n) => n.status === "to buy" && n.by <= addDays(t, 3));
-    if (urgentBuy.length) attn.push({ tag: "Buy", cls: "warn", text: plural(urgentBuy.length, "material") + " needed in the next 3 days not ordered yet", href: "#/stock" });
-    const waiting = S.attendance.filter((a) => a.status === "waiting" && isDone(a)).length;
-    const reports = S.disputes.filter((d) => d.status === "open").length;
-    if (reports) attn.push({ tag: "Report", cls: "warn", text: plural(reports, "worker report") + " about pay or hours", href: "#/attendance" });
-    if (waiting) attn.push({ tag: "Check", cls: "", text: plural(waiting, "attendance record") + " waiting for the site manager", href: "#/attendance" });
+    urgentBuy.slice(0, 2).forEach((n) => { const m = material(n.materialId), p = project(n.projectId); todo.push({ cls: "warn", text: "Order " + esc(m ? m.name.replace(/\s*\(.*\)/, "").toLowerCase() : "material") + (p ? " for " + esc(p.name) : "") + ' <span class="muted">(needed ' + relDay(n.by) + ")</span>", btn: "Order", act: 'data-action="need-status" data-id="' + n.id + '" data-to="ordered"' }); });
+    const reports = S.disputes.filter((d) => d.status === "open");
+    if (reports.length) todo.push({ cls: "warn", text: plural(reports.length, "worker report") + " about pay or hours", btn: "See", act: 'href="#/attendance"' });
+    const shown = todo.slice(0, 5);
 
-    const inSum = sum(expIn, (m) => m.amount), outList = billsDue(30), outSum = sum(outList, (m) => m.amount);
-    const maxV = Math.max(inSum, outSum, 1);
-
-    return '<div class="page-head"><div><p class="greet-small">' + greeting() + ", " + esc(S.people.boss.name) + '</p><h1 class="page-title">Today, ' + fmtDayLong(t).replace(",", "") + '</h1></div></div>' +
-      '<div class="stats">' +
-      '<a class="stat" href="#/money"><div class="stat-label">Spent this month' + icon("arrow") + '</div><div class="stat-value num"><span class="unit">RM</span>' + Math.round(spent).toLocaleString("en-MY") + '</div><div class="stat-foot">' + plural(receiptsCount, "receipt") + " in " + MON_LONG[+mk.slice(5) - 1] + "</div></a>" +
-      '<a class="stat" href="#/money"><div class="stat-label">Money expected in' + icon("arrow") + '</div><div class="stat-value num"><span class="unit">RM</span>' + Math.round(inSum).toLocaleString("en-MY") + '</div><div class="stat-foot">' + plural(expIn.length, "client payment") + " in the next 30 days</div></a>" +
-      '<a class="stat ' + (low.length ? "warn" : "") + '" href="#/stock"><div class="stat-label">Low stock' + icon("arrow") + '</div><div class="stat-value num">' + low.length + '<span class="unit" style="margin-left:6px">items</span></div><div class="stat-foot">' + (low.length ? esc(low.slice(0, 2).map((m) => m.name.replace(/\s*\(.*\)/, "")).join(", ")) + (low.length > 2 ? " and more" : "") : "Everything above minimum") + "</div></a>" +
-      "</div>" +
-      '<div class="grid-hero">' +
-      (busiest ? hero(busiest, true) : '<div class="card">' + empty("No projects yet.", '<br><button class="btn btn-primary" data-action="new-project">Add a project</button>') + "</div>") +
-      '<div class="stack">' +
-      '<div class="card"><div class="card-head"><h2 class="card-title">Needs your attention</h2>' + chip(String(attn.length), attn.length ? "warn" : "good") + "</div>" +
-      (attn.length ? attn.slice(0, 5).map((a) => '<a class="attn" href="' + a.href + '"><span class="attn-tag ' + a.cls + '">' + a.tag + '</span><span class="grow small">' + a.text + "</span></a>").join("") : empty("Nothing needs you right now.")) + "</div>" +
-      '<div class="dark-card"><div class="row-between"><div><div class="muted small">Next 30 days</div><div style="font-size:30px;font-weight:500;letter-spacing:-.02em" class="num">' + (inSum - outSum >= 0 ? "+" : "−") + RMshort(inSum - outSum).replace("RM ", "RM ") + '</div></div></div>' +
-      '<div class="flow-row"><span class="muted">Coming in</span><div class="flow-bars"><span style="width:' + (inSum / maxV) * 100 + '%;background:#8DB8B3"></span></div><span class="num">' + RMshort(inSum) + "</span></div>" +
-      '<div class="flow-row"><span class="muted">Bills to pay</span><div class="flow-bars"><span style="width:' + (outSum / maxV) * 100 + '%;background:#A3B4CF"></span></div><span class="num">' + RMshort(outSum) + "</span></div>" +
-      '</div>' +
-      "</div></div>" +
-      (!S.projects.length ? "" : '<div class="section"><h2 class="section-title">Projects <a class="link-btn small" href="#/projects">See all</a></h2><div class="card"><div class="list">' +
-      S.projects.map((p) => {
-        const st = projectStatus(p);
-        const pct = Math.round(progress(p) * 100);
-        return '<a class="li li-link proj-row" href="#/project/' + p.id + '"><div class="li-main"><div class="li-title">' + esc(p.name) + '</div><div class="li-sub">' + plural(crewsAt(p.id, t).length, "crew") + ' on site today<span class="show-sm">, ' + pct + "% done</span></div></div>" +
-          '<div class="pr-bar">' + pbar(progress(p)) + '</div><span class="pr-pct num small">' + pct + '%</span><span class="pr-st">' + chip(st.label, st.cls) + "</span></a>";
-      }).join("") + "</div></div></div>");
+    const inSum = sum(expectedIn(30), (m) => m.amount), outSum = sum(billsDue(30), (m) => m.amount);
+    return '<div class="page-head"><div><p class="greet-small">' + greeting() + ", " + esc(S.people.boss.name) + '</p><h1 class="page-title">' + (shown.length ? plural(shown.length, "thing needs", "things need") + " you today" : "Nothing needs you today") + "</h1></div></div>" +
+      (shown.length ? '<div class="card todo">' + shown.map((x) => '<div class="todo-row"><span class="dot" style="background:var(--' + (x.cls === "bad" ? "red" : "amber") + ')"></span><span class="grow">' + x.text + "</span>" +
+        (x.act.indexOf("href") === 0 ? "<a " + x.act + ' class="btn btn-sm btn-primary">' + x.btn + "</a>" : "<button " + x.act + ' class="btn btn-sm btn-primary">' + x.btn + "</button>") + "</div>").join("") +
+        (todo.length > shown.length ? '<div class="small muted mt-8">and ' + (todo.length - shown.length) + " more</div>" : "") + "</div>" : '<div class="card todo-ok">' + icon("check") + "<span>All good. Every project is on track and no bills are due this week.</span></div>") +
+      (!S.projects.length ? '<div class="card mt-16">' + empty("No projects yet.", '<br><button class="btn btn-primary" data-action="new-project">Add a project</button>') + "</div>" :
+        '<div class="section"><h2 class="section-title">My projects <a class="link-btn small" href="#/projects">See all</a></h2><div class="card"><div class="list">' +
+        S.projects.map((p) => {
+          const st = projectStatus(p), pct = Math.round(progress(p) * 100);
+          return '<a class="li li-link proj-row" href="#/project/' + p.id + '"><div class="li-main"><div class="li-title">' + esc(p.name) + '</div><div class="li-sub">' + plural(crewsAt(p.id, t).length, "crew") + ' on site today<span class="show-sm">, ' + pct + "% done</span></div></div>" +
+            '<div class="pr-bar">' + pbar(progress(p)) + '</div><span class="pr-pct num small">' + pct + '%</span><span class="pr-st">' + chip(st.label, st.cls) + "</span></a>";
+        }).join("") + "</div></div></div>") +
+      '<a class="money-line" href="#/money"><span>Money: <b>' + RMshort(spentInMonth(mk)) + "</b> spent in " + MON_LONG[+mk.slice(5) - 1] + ". <b>" + RMshort(inSum) + "</b> coming in and <b>" + RMshort(outSum) + "</b> in bills over the next 30 days.</span>" + '<span class="link-btn small">Money ›</span></a>';
   }
 
   function siteId() {
@@ -815,14 +797,6 @@
   }
 
   /* ---------- Calendar ---------- */
-  function dayInfo(d) {
-    const asg = assignmentsOn(d);
-    const projIds = Array.from(new Set(asg.map((a) => a.projectId)));
-    const free = freeCrews(d);
-    const needs = S.needs.filter((n) => n.by === d && n.status !== "arrived" && (!ui.calProject || n.projectId === ui.calProject));
-    const mine = ui.calProject ? asg.filter((a) => a.projectId === ui.calProject).map((a) => crew(a.crewId)).filter(Boolean) : [];
-    return { asg, projIds, free, needs, mine, sunday: S.settings.sundayOff && isSunday(d) };
-  }
   // "Crew A, Crew D" -> "Crews A and D"
   function crewNames(cs) {
     const names = cs.map((c) => c.name);
@@ -834,77 +808,121 @@
     }
     return names.slice(0, -1).join(", ") + " and " + names[names.length - 1];
   }
-  function cellLine(info) {
-    if (info.sunday) return "";
-    if (ui.calProject) return info.mine.length ? '<span class="cal-free">' + esc(crewNames(info.mine)) + "</span>" : "";
-    if (!S.crews.length) return "";
-    return info.free.length ? '<span class="cal-free">' + info.free.length + " free</span>" : '<span class="cal-free none">All busy</span>';
+  // weeks (Mon..Sun) covering a month
+  function monthWeeks(ym) {
+    const [y, m] = ym.split("-").map(Number);
+    const first = new Date(y, m - 1, 1);
+    const start = addDays(toISO(first), -((first.getDay() + 6) % 7));
+    const days = new Date(y, m, 0).getDate();
+    const n = Math.ceil((((first.getDay() + 6) % 7) + days) / 7);
+    const weeks = [];
+    for (let w = 0; w < n; w++) { const row = []; for (let i = 0; i < 7; i++) row.push(addDays(start, w * 7 + i)); weeks.push(row); }
+    return weeks;
   }
+  const shortName = (p) => p.name.replace(/\s+(Factory|Warehouse|Extension|Workshop|Cold Storage)$/i, "").trim() || p.name;
+  const monthNav = (ym, act) => { const [y, m] = ym.split("-").map(Number); return '<div class="cal-head"><button class="icon-btn sm" data-action="' + act + '" data-step="-1" aria-label="Previous month">' + icon("left") + '</button><div class="cal-month">' + MON_LONG[m - 1] + " " + y + '</div><button class="icon-btn sm" data-action="' + act + '" data-step="1" aria-label="Next month">' + icon("right") + "</button></div>"; };
+  const shiftMonth = (ym, step) => { const [y, m] = ym.split("-").map(Number); return toISO(new Date(y, m - 1 + step, 1)).slice(0, 7); };
+
+  // short point list for one day (main calendar)
+  function dayList(d) {
+    const sunday = S.settings.sundayOff && isSunday(d);
+    let h = '<div class="pop-title">' + fmtDayLong(d) + "</div>";
+    const dueSun = S.needs.filter((n) => n.by === d && n.status !== "arrived");
+    if (sunday) return h + '<div class="muted small">Rest day.</div>' + (dueSun.length ? '<div class="small mt-8">Deliveries: ' + dueSun.map((n) => { const m = material(n.materialId); return n.qty + " " + esc(m.unit) + " " + esc(m.name.replace(/\s*\(.*\)/, "").toLowerCase()); }).join(", ") + "</div>" : "");
+    const asg = assignmentsOn(d);
+    const pids = Array.from(new Set(asg.map((a) => a.projectId)));
+    h += pids.length ? '<ul class="pop-list">' + pids.map((pid) => { const p = project(pid), cs = asg.filter((a) => a.projectId === pid).map((a) => crew(a.crewId)).filter(Boolean); return '<li><span class="dot" style="background:' + p.color + '"></span><a href="#/project/' + pid + '" data-action="cal-proj" data-id="' + pid + '" data-m="' + monthKey(d) + '">' + esc(p.name) + "</a> " + '<span class="muted">' + esc(crewNames(cs)) + "</span></li>"; }).join("") + "</ul>" : '<div class="muted small">No crews booked.</div>';
+    const free = freeCrews(d);
+    h += '<div class="small mt-8">' + (free.length ? "Free: <b>" + esc(crewNames(free)) + "</b>" : '<span style="color:#8A5A1E">All crews busy</span>') + "</div>";
+    const needs = S.needs.filter((n) => n.by === d && n.status !== "arrived");
+    if (needs.length) h += '<div class="small mt-8">Deliveries: ' + needs.map((n) => { const m = material(n.materialId); return n.qty + " " + esc(m.unit) + " " + esc(m.name.replace(/\s*\(.*\)/, "").toLowerCase()); }).join(", ") + "</div>";
+    if (can.manage() || role() === "site") h += '<button class="btn btn-sm btn-soft mt-12" data-action="open-assign" data-d="' + d + '">' + icon("plus") + "Book a crew</button>";
+    return h;
+  }
+
   function viewCalendar() {
     const t = today();
-    const [y, m] = ui.calMonth.split("-").map(Number);
-    const first = new Date(y, m - 1, 1);
-    const startOffset = (first.getDay() + 6) % 7; // Monday first
-    const gridStart = addDays(toISO(first), -startOffset);
-    const daysInMonth = new Date(y, m, 0).getDate();
-    const cells = Math.ceil((startOffset + daysInMonth) / 7) * 7;
-
-    let grid = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((d) => '<div class="cal-dow">' + d + "</div>").join("");
-    for (let i = 0; i < cells; i++) {
-      const d = addDays(gridStart, i);
-      const out = monthKey(d) !== ui.calMonth;
-      const info = dayInfo(d);
-      const cls = ["cal-day", out ? "out" : "", d === t ? "today" : "", d === ui.selDay ? "sel" : "", info.sunday ? "sun" : "", info.mine.length && !out ? "hit" : ""].join(" ");
-      grid += '<button class="' + cls + '" data-action="sel-day" data-d="' + d + '" aria-label="' + fmtDayLong(d) + '"><span class="cal-n">' + parse(d).getDate() + "</span>" +
-        (!out && info.needs.length ? '<span class="cal-mat" title="Delivery due">' + icon("truck") + "</span>" : "") +
-        (out ? "" : cellLine(info)) + "</button>";
-    }
-
-    // phone: week strip around selected day
-    const sel = ui.selDay;
-    const wkStart = addDays(sel, -((parse(sel).getDay() + 6) % 7));
-    let strip = "";
-    for (let i = 0; i < 7; i++) {
-      const d = addDays(wkStart, i), info = dayInfo(d);
-      const line = info.sunday ? "&nbsp;" : ui.calProject ? (info.mine.length ? '<i class="wk-on"></i>' : "&nbsp;") : info.free.length ? info.free.length + " free" : '<b class="none">Busy</b>';
-      strip += '<button class="wk-day ' + (d === t ? "today " : "") + (d === sel ? "sel " : "") + (info.mine.length ? "hit" : "") + '" data-action="sel-day" data-d="' + d + '"><span class="dow">' + DOW[parse(d).getDay()] + '</span><span class="n">' + parse(d).getDate() + '</span><span class="wk-free">' + line + "</span></button>";
-    }
-
-    const filter = '<select class="input pill-select" data-change="calProject" aria-label="Show one project">' +
-      '<option value="">All projects</option>' + S.projects.map((p) => '<option value="' + p.id + '"' + (ui.calProject === p.id ? " selected" : "") + ">" + esc(p.name) + "</option>").join("") + "</select>";
-    return '<div class="page-head"><div><h1 class="page-title">Calendar' + helpBtn("Each day shows how many crews are free. Pick one project at the top to shade the days its crews work there. Tap a day to see which crew goes where.") + "</h1></div>" +
-      (can.manage() || role() === "site" ? '<button class="btn btn-primary" data-action="open-assign">' + icon("users") + "Book a crew</button>" : "") + "</div>" +
-      '<div class="row-between wrap" style="margin-bottom:16px">' + filter +
-      '<div class="cal-head desktop-only"><button class="icon-btn" data-action="cal-month" data-step="-1" aria-label="Previous month">' + icon("left") + '</button><div class="cal-month">' + MON_LONG[m - 1] + " " + y + '</div><button class="icon-btn" data-action="cal-month" data-step="1" aria-label="Next month">' + icon("right") + "</button>" +
-      '<button class="btn btn-sm" data-action="cal-today">Today</button></div>' +
-      '<div class="cal-head mobile-only"><button class="icon-btn" data-action="cal-week" data-step="-7" aria-label="Previous week">' + icon("left") + '</button><div class="cal-month">' + parse(wkStart).getDate() + " " + MON[parse(wkStart).getMonth()] + " – " + parse(addDays(wkStart, 6)).getDate() + " " + MON[parse(addDays(wkStart, 6)).getMonth()] + '</div><button class="icon-btn" data-action="cal-week" data-step="7" aria-label="Next week">' + icon("right") + "</button>" +
-      '<button class="btn btn-sm" data-action="cal-today">Today</button></div></div>' +
-      '<div class="cal-layout"><div><div class="cal-grid">' + grid + '</div><div class="week-strip">' + strip + "</div></div>" +
-      '<div class="card day-panel">' + dayPanel(sel) + "</div></div>";
+    const weeks = monthWeeks(ui.calMonth);
+    const html = weeks.map((wk) => {
+      // one bar per project per run of consecutive days with its crews booked
+      const segs = [];
+      S.projects.forEach((p) => {
+        let run = null;
+        wk.forEach((d, i) => {
+          const on = assignmentsOn(d).some((a) => a.projectId === p.id);
+          if (on && !run) run = { p, a: i, b: i };
+          else if (on) run.b = i;
+          if ((!on || i === 6) && run) { segs.push(run); run = null; }
+        });
+      });
+      const lanes = Array.from(new Set(segs.map((x) => x.p.id)));
+      const rows = lanes.length;
+      const cells = wk.map((d, i) => {
+        const out = monthKey(d) !== ui.calMonth, sun = S.settings.sundayOff && isSunday(d);
+        const free = freeCrews(d).length, needs = S.needs.filter((n) => n.by === d && n.status !== "arrived").length;
+        return '<div class="cm-day' + (out ? " out" : "") + (d === t ? " today" : "") + (sun ? " sun" : "") + '" role="button" tabindex="0" data-action="cal-day" data-d="' + d + '" style="grid-column:' + (i + 1) + ";grid-row:1 / span " + (rows + 2) + '">' +
+          '<span class="cm-n">' + parse(d).getDate() + "</span>" + (needs && !out ? '<span class="cm-truck" title="Delivery due">' + icon("truck") + "</span>" : "") +
+          (!sun && !out && S.crews.length ? '<span class="cm-free' + (free ? "" : " none") + '">' + (free ? free + " free" : "All busy") + "</span>" : "") +
+          '<div class="pop' + (i > 3 ? " right" : "") + '">' + dayList(d) + "</div></div>";
+      }).join("");
+      const bars = segs.map((x) => {
+        const cs = Array.from(new Set(wk.slice(x.a, x.b + 1).flatMap((d) => assignmentsOn(d).filter((a) => a.projectId === x.p.id).map((a) => a.crewId)))).map(crew).filter(Boolean);
+        return '<a class="cm-bar" href="#/project/' + x.p.id + '" data-action="cal-proj" data-id="' + x.p.id + '" data-m="' + ui.calMonth + '" style="--c:' + x.p.color + ";grid-column:" + (x.a + 1) + " / " + (x.b + 2) + ";grid-row:" + (lanes.indexOf(x.p.id) + 2) + '" title="' + esc(x.p.name + ": " + crewNames(cs) + ". Open its calendar.") + '">' + esc(x.b > x.a ? x.p.name : shortName(x.p)) + "</a>";
+      }).join("");
+      return '<div class="cm-week" style="grid-template-rows:26px ' + (rows ? "repeat(" + rows + ", 22px) " : "") + '20px">' + cells + bars + "</div>";
+    }).join("");
+    return '<div class="page-head"><div><h1 class="page-title">Calendar' + helpBtn("Each coloured bar is a project, running across the days its crews work there. Hover over a day (tap on a phone) to see the projects, crews and deliveries. Tap a project to open its own calendar.") + "</h1></div>" +
+      (can.manage() || role() === "site" ? '<button class="btn btn-primary btn-sm" data-action="open-assign">' + icon("users") + "Book a crew</button>" : "") + "</div>" +
+      '<div class="row-between wrap" style="margin-bottom:12px">' + monthNav(ui.calMonth, "cal-month") + '<button class="btn btn-sm" data-action="cal-today">Today</button></div>' +
+      '<div class="card cm"><div class="cm-dows">' + ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((x) => "<span>" + x + "</span>").join("") + "</div>" + html + "</div>";
   }
 
-  function dayPanel(d) {
-    const info = dayInfo(d);
-    let html = "<h3>" + fmtDayLong(d) + "</h3>";
-    if (info.sunday) return html + '<p class="muted mt-8">Rest day.</p>';
-    const allNeeds = S.needs.filter((n) => n.by === d && n.status !== "arrived");
-    html += '<div class="day-stats"><div class="day-stat"><b class="num' + (info.free.length ? "" : " warn") + '">' + info.free.length + "</b><span>" + (info.free.length === 1 ? "crew free" : "crews free") + '</span></div><div class="day-stat"><b class="num">' + allNeeds.length + "</b><span>" + (allNeeds.length === 1 ? "delivery due" : "deliveries due") + "</span></div></div>";
-    html += '<div class="day-sec"><div class="day-sec-title">Who goes where</div><div class="where">';
-    info.projIds.forEach((pid) => {
-      const cs = info.asg.filter((a) => a.projectId === pid).map((a) => crew(a.crewId)).filter(Boolean);
-      html += '<a class="where-row' + (ui.calProject === pid ? " on" : "") + '" href="#/project/' + pid + '"><span>' + esc(project(pid).name) + '</span><span class="muted">' + esc(crewNames(cs)) + "</span></a>";
-    });
-    if (info.free.length) html += '<div class="where-row"><span>Free</span><span class="free">' + esc(crewNames(info.free)) + "</span></div>";
-    if (!info.projIds.length && !info.free.length) html += '<p class="muted small">No crews yet.</p>';
-    html += "</div></div>";
-    if (allNeeds.length) {
-      html += '<div class="day-sec"><div class="day-sec-title">Deliveries due</div><div class="where">' + allNeeds.map((n) => {
-        const m = material(n.materialId), p = project(n.projectId);
-        return '<div class="where-row"><span>' + n.qty.toLocaleString("en-MY") + " " + esc(m.unit) + " " + esc(m.name.replace(/\s*\(.*\)/, "")) + '<span class="muted small" style="display:block">' + esc(p ? p.name : "Yard") + "</span></span>" + (n.status === "ordered" ? '<span class="muted small">Ordered</span>' : '<span class="small" style="color:#B0661A">Not ordered</span>') + "</div>";
-      }).join("") + "</div></div>";
+  /* project calendar: crews here / elsewhere / free, deliveries with a stock check */
+  function projDayList(p, d) {
+    const sunday = S.settings.sundayOff && isSunday(d);
+    let h = '<div class="pop-title">' + fmtDayLong(d) + "</div>";
+    const needsSun = S.needs.filter((n) => n.projectId === p.id && n.by === d);
+    if (sunday && !needsSun.length) return h + '<div class="muted small">Rest day.</div>';
+    if (sunday) h += '<div class="muted small">Rest day. A delivery is still due:</div>';
+    const asg = assignmentsOn(d);
+    const here = asg.filter((a) => a.projectId === p.id).map((a) => crew(a.crewId)).filter(Boolean);
+    const other = asg.filter((a) => a.projectId !== p.id);
+    const free = freeCrews(d);
+    h += '<ul class="pop-list">' +
+      (sunday ? "" : '<li><span class="key k-here"></span><b>Here:</b> ' + (here.length ? esc(crewNames(here)) + ' <span class="muted">(' + sum(here, (c) => crewWorkers(c.id).length) + " people)</span>" : '<span class="muted">none</span>') + "</li>" +
+      '<li><span class="key k-else"></span><b>Other projects:</b> ' + (other.length ? other.map((a) => esc(crew(a.crewId).name) + ' <span class="muted">(' + esc(shortName(project(a.projectId))) + ")</span>").join(", ") : '<span class="muted">none</span>') + "</li>" +
+      '<li><span class="key k-free"></span><b>Free:</b> ' + (free.length ? esc(crewNames(free)) : '<span class="muted">none</span>') + "</li></ul>");
+    const needs = S.needs.filter((n) => n.projectId === p.id && n.by === d);
+    if (needs.length) {
+      h += '<div class="pop-sub">Materials due</div><ul class="pop-list">' + needs.map((n) => {
+        const m = material(n.materialId); if (!m) return "";
+        const short = n.qty - m.qty;
+        const stock = n.status === "arrived" ? '<span style="color:var(--green)">Arrived</span>' : m.qty >= n.qty ? "Yard has " + m.qty + ' <span style="color:var(--green)">✓ enough</span>' : 'Yard has ' + m.qty + ' <span style="color:#8A5A1E">→ short ' + short + "</span>";
+        return "<li><b>" + n.qty.toLocaleString("en-MY") + " " + esc(m.unit) + "</b> " + esc(m.name) + '<div class="small">' + stock + (n.status !== "arrived" ? ', <span class="muted">' + (n.status === "ordered" ? "ordered" : "not ordered") + "</span>" : "") + "</div>" +
+          (n.status === "to buy" && can.buy() ? '<button class="btn btn-sm btn-primary mt-8" data-action="need-status" data-id="' + n.id + '" data-to="ordered">Mark ordered</button>' : "") + "</li>";
+      }).join("") + "</ul>";
     }
-    if (can.manage() || role() === "site") html += '<button class="btn btn-soft btn-block mt-16" data-action="open-assign" data-d="' + d + '">' + icon("plus") + "Book a crew</button>";
-    return html;
+    return h;
+  }
+  function projCalendar(p) {
+    const ym = ui.projCalMonth || monthKey(today() >= p.start && today() <= p.end ? today() : p.start);
+    ui.projCalMonth = ym;
+    const t = today(), total = S.crews.length || 1;
+    const cells = monthWeeks(ym).map((wk) => wk.map((d, i) => {
+      const out = monthKey(d) !== ym, sun = S.settings.sundayOff && isSunday(d);
+      const inRange = d >= p.start && d <= p.end;
+      const asg = assignmentsOn(d), here = asg.filter((a) => a.projectId === p.id).length, other = asg.length - here, free = Math.max(0, total - asg.length);
+      const needs = S.needs.filter((n) => n.projectId === p.id && n.by === d && n.status !== "arrived");
+      const shortN = needs.some((n) => { const m = material(n.materialId); return m && m.qty < n.qty && n.status === "to buy"; });
+      return '<div class="pc-day' + (out ? " out" : "") + (d === t ? " today" : "") + (sun ? " sun" : "") + (!inRange ? " off" : "") + '" role="button" tabindex="0" data-action="pc-day" data-d="' + d + '">' +
+        '<span class="cm-n">' + parse(d).getDate() + "</span>" + (needs.length ? '<span class="cm-truck' + (shortN ? " short" : "") + '" title="' + (shortN ? "Delivery due, yard is short" : "Delivery due") + '">' + icon("truck") + "</span>" : "") +
+        (!sun && !out ? '<div class="crew-bar" aria-label="' + here + " here, " + other + " elsewhere, " + free + ' free"><span class="cb-here" style="width:' + (here / total) * 100 + '%"></span><span class="cb-else" style="width:' + (other / total) * 100 + '%"></span></div><span class="pc-num">' + here + "/" + total + "</span>" : "") +
+        '<div class="pop' + (i > 3 ? " right" : "") + '">' + projDayList(p, d) + "</div></div>";
+    }).join("")).join("");
+    return '<div class="row-between wrap" style="margin-bottom:10px">' + monthNav(ym, "pc-month") +
+      '<div class="pc-legend"><span><i class="key k-here"></i>This project</span><span><i class="key k-else"></i>Other projects</span><span><i class="key k-free"></i>Free</span><span>' + icon("truck") + "Delivery</span></div></div>" +
+      '<div class="cm-dows">' + ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((x) => "<span>" + x + "</span>").join("") + '</div><div class="pc-grid">' + cells + "</div>" +
+      (ui.calBack ? '<a class="back mt-12" href="#/calendar">' + icon("left") + "Back to the main calendar</a>" : "");
   }
 
   /* ---------- Projects ---------- */
@@ -937,6 +955,8 @@
     const p = project(id);
     if (!p) return '<a class="back" href="#/projects">' + icon("left") + "Projects</a>" + '<div class="card mt-16">' + empty("This project was not found.") + "</div>";
     const t = today();
+    if (ui.lastProj !== id) { ui.lastProj = id; if (!ui.calJump) ui.projCalMonth = null; }
+    ui.calJump = false;
     const st = projectStatus(p);
     const recsToday = S.attendance.filter((a) => a.projectId === id && a.date === t);
     const needs = S.needs.filter((n) => n.projectId === id).sort((a, b) => a.by.localeCompare(b.by));
@@ -948,7 +968,7 @@
     const expIn = sum(money.filter((m) => m.dir === "in" && m.status === "expected"), (m) => m.amount);
     const labour = sum(S.attendance.filter((a) => a.projectId === id && a.status === "approved"), payFor);
 
-    return '<a class="back" href="#/projects">' + icon("left") + "Projects</a>" +
+    return (ui.calBack ? '<a class="back" href="#/calendar">' + icon("left") + "Calendar</a>" : '<a class="back" href="#/projects">' + icon("left") + "Projects</a>") +
       '<div class="page-head" style="margin-top:6px"><div><h1 class="page-title">' + esc(p.name) + '</h1><p class="page-sub">' + esc(p.client) + ", " + esc(p.location) + "</p></div>" +
       '<div class="row wrap">' + (can.tick() ? '<button class="btn" data-action="open-delay" data-id="' + p.id + '">' + icon("hourglass") + "Delay this job</button>" : "") +
       '<button class="btn" data-action="project-photo" data-id="' + p.id + '">' + icon("image") + (p.photo ? "Change site photo" : "Add site photo") + "</button></div></div>" +
@@ -956,6 +976,7 @@
       '<div class="stack"><div class="card"><div class="card-head"><h2 class="card-title">Timeline</h2>' + chip(st.label, st.cls) + "</div>" + timelineHTML(p) + "</div>" +
       '<div class="card"><div class="card-head"><h2 class="card-title">Work phases</h2><span class="muted small">' + p.phases.filter((x) => x.done).length + " of " + p.phases.length + " done</span></div>" + phasesHTML(p) + "</div></div></div>" +
       '<div class="section">' + tiles("project", [
+        { id: "cal", icon: "calendar", label: "Calendar", title: "Calendar, " + esc(p.name), body: () => projCalendar(p) },
         { id: "delays", icon: "hourglass", label: "Delays", count: p.delays.length, warn: lateDays(p) > 0, title: p.delays.length ? "Delays, " + plural(lateDays(p), "day") + " in total" : "Delays",
           body: () => (p.delays.length ? '<div class="list">' + p.delays.slice().reverse().map((d) => '<div class="li"><div class="li-main"><div class="li-title">+' + plural(d.days, "day") + ", " + esc(d.reason) + '</div><div class="li-sub">' + fmtDate(d.date) + (d.note ? ". " + esc(d.note) : "") + " Logged by " + esc(ROLE_LABEL[d.by] || d.by).toLowerCase() + ".</div></div></div>").join("") + "</div>" : empty("No delays logged.")) + (can.tick() ? '<button class="btn btn-soft mt-12" data-action="open-delay" data-id="' + p.id + '">' + icon("hourglass") + "Delay this job</button>" : "") },
         { id: "crews", icon: "users", label: "Crews", count: crewsAt(id, t).length, title: "Crews", body: () => myAsg.length ? '<div class="list">' + myAsg.map((a) => { const c = crew(a.crewId); return '<div class="li"><div class="li-main"><div class="li-title">' + esc(c ? c.name : "?") + ' <span class="muted small">' + esc(c ? c.trade : "") + '</span></div><div class="li-sub">' + fmtDate(a.from) + " to " + fmtDate(a.to) + "</div></div>" + (a.from <= t && a.to >= t ? chip("Here now", "good") : a.from > t ? chip("Coming", "info") : chip("Finished", "")) + "</div>"; }).join("") + "</div>" : empty("No crews booked.") },
@@ -1521,6 +1542,8 @@
   const errBox = () => (ui.sheet.err ? '<div class="form-error">' + ui.sheet.err + "</div>" : "");
 
   const SHEETS = {
+    daylist(s) { return sheetHead("") + '<div class="pop-in-sheet">' + dayList(s.d) + "</div>"; },
+    pday(s) { const p = project(s.pid); return sheetHead("") + '<div class="pop-in-sheet">' + projDayList(p, s.d) + "</div>" + (isPhone() ? '<button class="btn btn-soft mt-16" data-action="pc-back">' + icon("left") + "Back to " + esc(p.name) + " calendar</button>" : ""); },
     reject(s) {
       const r = S.attendance.find((a) => a.id === s.recId), w = worker(r.workerId), sf = r.self || {}, e = eff(r);
       const part = val("part", "");
@@ -2141,10 +2164,23 @@
     },
 
     /* calendar & crews */
-    "sel-day"(el) { ui.selDay = el.dataset.d; if (monthKey(ui.selDay) !== ui.calMonth) ui.calMonth = monthKey(ui.selDay); render(); },
-    "cal-month"(el) { const [y, m] = ui.calMonth.split("-").map(Number); const d = new Date(y, m - 1 + +el.dataset.step, 1); ui.calMonth = toISO(d).slice(0, 7); ui.selDay = monthKey(today()) === ui.calMonth ? today() : toISO(d); render(); },
-    "cal-week"(el) { ui.selDay = addDays(ui.selDay, +el.dataset.step); ui.calMonth = monthKey(ui.selDay); render(); },
-    "cal-today"() { ui.selDay = today(); ui.calMonth = monthKey(today()); render(); },
+    "cal-month"(el) { ui.calMonth = shiftMonth(ui.calMonth, +el.dataset.step); render(); },
+    "cal-today"() { ui.calMonth = monthKey(today()); render(); },
+    "cal-day"(el, e) {
+      // laptop: the hover list already shows; a click (or a tap on a phone) opens it as a pop-up
+      openSheet({ type: "daylist", d: el.dataset.d });
+    },
+    "cal-proj"(el) {
+      closeSheet();
+      ui.calBack = true; ui.calJump = true; ui.projCalMonth = el.dataset.m || null; ui.tile.project = "cal"; ui.lastProj = el.dataset.id;
+      ui.pendingPanel = isPhone() ? { g: "project", t: "cal" } : null;
+      ui.scrollToPanel = !isPhone();
+      if (location.hash === "#/project/" + el.dataset.id) render(); else location.hash = "#/project/" + el.dataset.id;
+    },
+    "pc-month"(el) { ui.projCalMonth = shiftMonth(ui.projCalMonth, +el.dataset.step); if (ui.sheet && ui.sheet.type === "panel") renderSheet(); render(); },
+    "pc-day"(el) { openSheet({ type: "pday", d: el.dataset.d, pid: route().id }); },
+    "pc-back"() { openSheet({ type: "panel", g: "project", t: "cal" }); },
+    "go-bills"() { ui.tile.money = "bills"; ui.pendingPanel = isPhone() ? { g: "money", t: "bills" } : null; location.hash = "#/money"; },
     "open-assign"(el) { if (!S.crews.length || !S.projects.length) return toast("Add a crew and a project first.", "alert"); openSheet({ type: "assign", d: el && el.dataset.d }); },
     "assign-save"() {
       const s = ui.sheet, f = F();
@@ -2322,7 +2358,7 @@
       ui.attPicked = false;
     }
   }
-  window.addEventListener("hashchange", () => { ui.menu = false; if (ui.sheet) closeSheet(); enterRoute(); render(); window.scrollTo(0, 0); });
+  window.addEventListener("hashchange", () => { ui.menu = false; if (ui.sheet) closeSheet(); if (!ui.calJump) ui.calBack = false; enterRoute(); render(); window.scrollTo(0, 0); });
 
   /* ======================================================================
      9. Start

@@ -183,7 +183,7 @@ one are clocked in by the site manager with a photo, as before.
 ## 7. How it works (technical)
 
 - **No build step.** `index.html` loads `styles.css`, `three.min.js` (3D library, MIT, bundled locally), `factory3d.js`, `sample-data.js` and `app.js`.
-- **Updates reach phones straight away:** `index.html` links every file with a version number (`app.js?v=0.5.1`). Bump it on each release so browsers don't keep showing an old cached copy (GitHub Pages lets browsers cache files for 10 minutes).
+- **Updates reach phones straight away:** `index.html` links every file with a version number (`app.js?v=0.6.0`). Bump it on each release so browsers don't keep showing an old cached copy (GitHub Pages lets browsers cache files for 10 minutes).
 - **Data:** everything except photos is one JSON object in `localStorage` (`sitebook-data-v1`). Photos are compressed to ~720px JPEG and kept in **IndexedDB** (`sitebook-photos`).
 - **Screens** are functions returning HTML; clicks are handled in one place through `data-action` attributes.
 - **3D buildings** (`factory3d.js`): each project gets its own randomly generated factory (sawtooth roof, silos) or warehouse (gable roof, loading docks), seeded by the project id. The model shows progress: steel frame → walls going up (teal) → finished, with a tower crane until 92%. One shared WebGL view plus one for still thumbnails. Falls back to a line drawing if WebGL is not available.
@@ -248,6 +248,23 @@ Site manager only worker has no phone                             → neutral, n
 11. **e-Invoicing (LHDN MyInvois)** is being phased in. Accountants will ask for supplier TIN and e-invoice numbers. Plan fields for it before production.
 
 ## 9. Change log
+
+### v0.6.0 — 21 Nov 2026 — simple owner home, calendar with project bars, project calendars
+Client feedback: "the management Today page looks like a standard web dashboard: complicated, too many things, too many tabs, I don't know what to press. Calendar: each day should show which projects are running; on hover a short point list of projects and crews; tap a project to open its project calendar, which shows crews available vs used as a coloured bar, and material details with stock." Each change was approved one by one:
+- **Owner home starts with a to-do list:** "5 things need you today", each with one button: **Pay** (bills due or overdue, opens Money → Bills to pay), **Open** (late projects), **Order** (materials needed in the next 3 days that aren't ordered; marks them ordered) and **See** (worker reports). When nothing is pending: "Nothing needs you today" and a green all-good line.
+- Below that: **My projects** (one line each, progress bar and traffic light) and **one money sentence** ("RM 168k spent in November. RM 1.81m coming in and RM 249k in bills over the next 30 days. Money ›").
+- Removed from the owner home: the three big numbers, the 3D building (still on project pages), the attention box and the dark cash card.
+- **Owner tabs: Home, Calendar, Projects, Money.** Stock is in the ☰ menu and inside each project. Site managers and buyers keep the Stock tab. "Today" is renamed **Home** for everyone.
+- **No Log button for the owner.**
+- **Calendar:** each project is one long coloured bar running across the days its crews work there (one lane per project, breaking at the Sunday rest day). Days still show "1 free" / "All busy" and a truck on delivery days.
+  - **Hover over a day** (laptop) for a short list: projects with their crews, free crews, deliveries, and Book a crew. **On a phone, tap the day** for the same list as a pop-up.
+  - The old side panel and project picker are gone; the calendar uses the full width, including on phones (no more week strip).
+  - **Tap a project** (bar or name in the list) to open that project's calendar.
+- **Project calendar** (new **Calendar** tab, first on every project page):
+  - Each day has a **3-colour crew bar**: teal = crews on this project, grey = crews on other projects, white = free, with "2/5" underneath. Days outside the project's dates are faded.
+  - **Truck mark** on delivery days, amber when the yard does not have enough and nothing is ordered.
+  - Hover (laptop) or tap (phone) shows: crews here (with head count), crews on other projects (and where), free crews, and **materials due with a stock check**: "Yard has 64 → short 136, not ordered", with a **Mark ordered** button.
+  - Arriving from the main calendar shows "‹ Calendar" back links and scrolls straight to the project calendar.
 
 ### v0.5.1 — 20 Nov 2026 — clock-in tables, original times protected, rounding, saved reasons
 Client feedback: "history in table form, 2 columns, clock in and clock out, time big, date small; no back button on rejected days; how do I know if I reject the clock in or the clock out; the site manager must not overwrite the worker's original time, only write another time; duration auto calculated with exact / nearest 30 min / nearest hour; let the manager save reject reasons for next time".
