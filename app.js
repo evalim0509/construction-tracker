@@ -575,6 +575,8 @@
       if (p) window.Factory3D.attach(el, { seed: p.id + p.name, progress: progress(p), type: p.type });
     });
     $$("details[data-fold]").forEach((d) => d.addEventListener("toggle", () => { d.open ? ui.open.add(d.dataset.fold) : ui.open.delete(d.dataset.fold); }));
+    hideHoverPop();
+    setupCarousel();
     if (ui.scrollToPanel) { ui.scrollToPanel = false; setTimeout(() => { const el = $(".tile-panel"); if (el) el.scrollIntoView({ block: "start" }); }, 60); }
     if (ui.pendingPanel) { const pp = ui.pendingPanel; ui.pendingPanel = null; setTimeout(() => openSheet({ type: "panel", g: pp.g, t: pp.t }), 0); }
   }
@@ -840,16 +842,17 @@
     return h;
   }
 
-  function viewCalendar() {
+  // one month card (used side by side in the swipeable calendar)
+  function monthCard(ym) {
     const t = today();
-    const weeks = monthWeeks(ui.calMonth);
-    const html = weeks.map((wk) => {
+    const [yy, mm] = ym.split("-").map(Number);
+    const html = monthWeeks(ym).map((wk) => {
       // one bar per project per run of consecutive days with its crews booked
       const segs = [];
       S.projects.forEach((p) => {
         let run = null;
         wk.forEach((d, i) => {
-          const on = assignmentsOn(d).some((a) => a.projectId === p.id);
+          const on = monthKey(d) === ym && assignmentsOn(d).some((a) => a.projectId === p.id);
           if (on && !run) run = { p, a: i, b: i };
           else if (on) run.b = i;
           if ((!on || i === 6) && run) { segs.push(run); run = null; }
@@ -858,24 +861,101 @@
       const lanes = Array.from(new Set(segs.map((x) => x.p.id)));
       const rows = lanes.length;
       const cells = wk.map((d, i) => {
-        const out = monthKey(d) !== ui.calMonth, sun = S.settings.sundayOff && isSunday(d);
+        const out = monthKey(d) !== ym, sun = S.settings.sundayOff && isSunday(d);
         const free = freeCrews(d).length, needs = S.needs.filter((n) => n.by === d && n.status !== "arrived").length;
-        return '<div class="cm-day' + (out ? " out" : "") + (d === t ? " today" : "") + (sun ? " sun" : "") + '" role="button" tabindex="0" data-action="cal-day" data-d="' + d + '" style="grid-column:' + (i + 1) + ";grid-row:1 / span " + (rows + 2) + '">' +
-          '<span class="cm-n">' + parse(d).getDate() + "</span>" + (needs && !out ? '<span class="cm-truck" title="Delivery due">' + icon("truck") + "</span>" : "") +
-          (!sun && !out && S.crews.length ? '<span class="cm-free' + (free ? "" : " none") + '">' + (free ? free + " free" : "All busy") + "</span>" : "") +
-          '<div class="pop' + (i > 3 ? " right" : "") + '">' + dayList(d) + "</div></div>";
+        return '<div class="cm-day' + (out ? " out" : "") + (d === t && !out ? " today" : "") + (sun ? " sun" : "") + '"' + (out ? "" : ' role="button" tabindex="0" data-action="cal-day" data-hover="day"') + ' data-d="' + d + '" style="grid-column:' + (i + 1) + ";grid-row:1 / span " + (rows + 2) + '">' +
+          (out ? "" : '<span class="cm-n">' + parse(d).getDate() + "</span>" + (needs ? '<span class="cm-truck" title="Delivery due">' + icon("truck") + "</span>" : "") +
+          (!sun && S.crews.length ? '<span class="cm-free' + (free ? "" : " none") + '">' + (free ? free + " free" : "All busy") + "</span>" : "")) + "</div>";
       }).join("");
       const bars = segs.map((x) => {
         const cs = Array.from(new Set(wk.slice(x.a, x.b + 1).flatMap((d) => assignmentsOn(d).filter((a) => a.projectId === x.p.id).map((a) => a.crewId)))).map(crew).filter(Boolean);
-        return '<a class="cm-bar" href="#/project/' + x.p.id + '" data-action="cal-proj" data-id="' + x.p.id + '" data-m="' + ui.calMonth + '" style="--c:' + x.p.color + ";grid-column:" + (x.a + 1) + " / " + (x.b + 2) + ";grid-row:" + (lanes.indexOf(x.p.id) + 2) + '" title="' + esc(x.p.name + ": " + crewNames(cs) + ". Open its calendar.") + '">' + esc(x.b > x.a ? x.p.name : shortName(x.p)) + "</a>";
+        return '<a class="cm-bar" href="#/project/' + x.p.id + '" data-action="cal-proj" data-id="' + x.p.id + '" data-m="' + ym + '" style="--c:' + x.p.color + ";grid-column:" + (x.a + 1) + " / " + (x.b + 2) + ";grid-row:" + (lanes.indexOf(x.p.id) + 2) + '" title="' + esc(x.p.name + ": " + crewNames(cs) + ". Open its calendar.") + '">' + esc(x.b > x.a ? x.p.name : shortName(x.p)) + "</a>";
       }).join("");
-      return '<div class="cm-week" style="grid-template-rows:26px ' + (rows ? "repeat(" + rows + ", 22px) " : "") + '20px">' + cells + bars + "</div>";
+      return '<div class="cm-week" style="grid-template-rows:30px ' + (rows ? "repeat(" + rows + ", 18px) " : "") + '18px">' + cells + bars + "</div>";
     }).join("");
-    return '<div class="page-head"><div><h1 class="page-title">Calendar' + helpBtn("Each coloured bar is a project, running across the days its crews work there. Hover over a day (tap on a phone) to see the projects, crews and deliveries. Tap a project to open its own calendar.") + "</h1></div>" +
-      (can.manage() || role() === "site" ? '<button class="btn btn-primary btn-sm" data-action="open-assign">' + icon("users") + "Book a crew</button>" : "") + "</div>" +
-      '<div class="row-between wrap" style="margin-bottom:12px">' + monthNav(ui.calMonth, "cal-month") + '<button class="btn btn-sm" data-action="cal-today">Today</button></div>' +
-      '<div class="card cm"><div class="cm-dows">' + ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((x) => "<span>" + x + "</span>").join("") + "</div>" + html + "</div>";
+    return '<section class="card cm cm-month" data-ym="' + ym + '"><h2 class="cm-title">' + MON_LONG[mm - 1] + " " + yy + '</h2><div class="cm-dows">' + ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((x) => "<span>" + x + "</span>").join("") + "</div>" + html + "</section>";
   }
+  // months shown in the carousel: 3 back, 11 ahead
+  function calMonths() { const out = []; for (let i = -3; i <= 11; i++) out.push(shiftMonth(monthKey(today()), i)); return out; }
+
+  function viewCalendar() {
+    const months = calMonths();
+    if (months.indexOf(ui.calMonth) < 0) ui.calMonth = monthKey(today());
+    return '<div class="page-head"><div><h1 class="page-title">Calendar' + helpBtn("Each coloured bar is a project, running across the days its crews work there. Swipe sideways (or drag, or use the arrows) to see other months. Hover over a day (tap on a phone) to see the projects, crews and deliveries. Tap a project to open its own calendar.") + "</h1></div>" +
+      (can.manage() || role() === "site" ? '<button class="btn btn-primary btn-sm" data-action="open-assign">' + icon("users") + "Book a crew</button>" : "") + "</div>" +
+      '<div class="row-between" style="margin-bottom:12px"><div class="cal-head"><button class="icon-btn sm" data-action="car-step" data-step="-1" aria-label="Previous month">' + icon("left") + '</button><button class="icon-btn sm" data-action="car-step" data-step="1" aria-label="Next month">' + icon("right") + '</button></div><button class="btn btn-sm" data-action="cal-today">Today</button></div>' +
+      '<div class="cal-car" id="calCar">' + months.map(monthCard).join("") + "</div>";
+  }
+
+  /* carousel: start at the chosen month, remember where the user swiped to, drag with a mouse */
+  function setupCarousel() {
+    const car = $("#calCar"); if (!car) return;
+    const cardAt = (ym) => car.querySelector('[data-ym="' + ym + '"]');
+    const first = cardAt(ui.calMonth);
+    if (first) car.scrollLeft = first.offsetLeft - car.offsetLeft;
+    let tmr = 0;
+    car.addEventListener("scroll", () => {
+      clearTimeout(tmr);
+      tmr = setTimeout(() => {
+        const cards = Array.from(car.children);
+        const x = car.scrollLeft;
+        let best = cards[0];
+        cards.forEach((c) => { if (Math.abs(c.offsetLeft - car.offsetLeft - x) < Math.abs(best.offsetLeft - car.offsetLeft - x)) best = c; });
+        ui.calMonth = best.dataset.ym;
+      }, 120);
+    }, { passive: true });
+    // mouse drag (touch and trackpads scroll natively)
+    let drag = null;
+    car.addEventListener("pointerdown", (e) => {
+      if (e.pointerType !== "mouse" || e.button !== 0) return;
+      drag = { x: e.clientX, left: car.scrollLeft, moved: false };
+    });
+    window.addEventListener("pointermove", (e) => {
+      if (!drag) return;
+      const dx = e.clientX - drag.x;
+      if (!drag.moved && Math.abs(dx) > 6) { drag.moved = true; car.classList.add("dragging"); hideHoverPop(); }
+      if (drag.moved) car.scrollLeft = drag.left - dx;
+    });
+    window.addEventListener("pointerup", () => {
+      if (!drag) return;
+      const moved = drag.moved, startLeft = drag.left;
+      drag = null;
+      if (!moved) return;
+      car.classList.remove("dragging");
+      // settle on the nearest month, leaning in the direction of the drag
+      const cards = Array.from(car.children), w = cards[0].offsetWidth + 16;
+      const dir = car.scrollLeft > startLeft ? 0.35 : -0.35;
+      const idx = Math.max(0, Math.min(cards.length - 1, Math.round(car.scrollLeft / w + dir)));
+      car.scrollTo({ left: cards[idx].offsetLeft - car.offsetLeft, behavior: "smooth" });
+      // swallow the click that ends a drag
+      const stop = (ev) => { ev.stopPropagation(); ev.preventDefault(); window.removeEventListener("click", stop, true); };
+      window.addEventListener("click", stop, true);
+      setTimeout(() => window.removeEventListener("click", stop, true), 50);
+    });
+  }
+  function carStep(step) {
+    const car = $("#calCar"); if (!car) return;
+    const months = calMonths();
+    const i = Math.max(0, Math.min(months.length - 1, months.indexOf(ui.calMonth) + step));
+    ui.calMonth = months[i];
+    const c = car.querySelector('[data-ym="' + ui.calMonth + '"]');
+    if (c) car.scrollTo({ left: c.offsetLeft - car.offsetLeft, behavior: "smooth" });
+  }
+
+  /* one floating hover list (laptops), so it is never cut off by the carousel edges */
+  let hoverTmr = 0;
+  function showHoverPop(el) {
+    const pop = $("#hoverPop");
+    const d = el.dataset.d;
+    pop.innerHTML = el.classList.contains("pc-day") ? projDayList(project(route().id), d) : dayList(d);
+    pop.hidden = false;
+    const r = el.getBoundingClientRect(), pw = pop.offsetWidth, ph = pop.offsetHeight;
+    let left = Math.min(window.innerWidth - pw - 12, Math.max(12, r.left));
+    let top = r.bottom + 4;
+    if (top + ph > window.innerHeight - 12) top = Math.max(12, r.top - ph - 4);
+    pop.style.left = left + "px"; pop.style.top = top + "px";
+  }
+  function hideHoverPop() { const pop = $("#hoverPop"); if (pop) pop.hidden = true; }
 
   /* project calendar: crews here / elsewhere / free, deliveries with a stock check */
   function projDayList(p, d) {
@@ -914,10 +994,10 @@
       const asg = assignmentsOn(d), here = asg.filter((a) => a.projectId === p.id).length, other = asg.length - here, free = Math.max(0, total - asg.length);
       const needs = S.needs.filter((n) => n.projectId === p.id && n.by === d && n.status !== "arrived");
       const shortN = needs.some((n) => { const m = material(n.materialId); return m && m.qty < n.qty && n.status === "to buy"; });
-      return '<div class="pc-day' + (out ? " out" : "") + (d === t ? " today" : "") + (sun ? " sun" : "") + (!inRange ? " off" : "") + '" role="button" tabindex="0" data-action="pc-day" data-d="' + d + '">' +
+      return '<div class="pc-day' + (out ? " out" : "") + (d === t ? " today" : "") + (sun ? " sun" : "") + (!inRange ? " off" : "") + '" role="button" tabindex="0" data-action="pc-day" data-hover="pday" data-d="' + d + '">' +
         '<span class="cm-n">' + parse(d).getDate() + "</span>" + (needs.length ? '<span class="cm-truck' + (shortN ? " short" : "") + '" title="' + (shortN ? "Delivery due, yard is short" : "Delivery due") + '">' + icon("truck") + "</span>" : "") +
         (!sun && !out ? '<div class="crew-bar" aria-label="' + here + " here, " + other + " elsewhere, " + free + ' free"><span class="cb-here" style="width:' + (here / total) * 100 + '%"></span><span class="cb-else" style="width:' + (other / total) * 100 + '%"></span></div><span class="pc-num">' + here + "/" + total + "</span>" : "") +
-        '<div class="pop' + (i > 3 ? " right" : "") + '">' + projDayList(p, d) + "</div></div>";
+        "</div>";
     }).join("")).join("");
     return '<div class="row-between wrap" style="margin-bottom:10px">' + monthNav(ym, "pc-month") +
       '<div class="pc-legend"><span><i class="key k-here"></i>This project</span><span><i class="key k-else"></i>Other projects</span><span><i class="key k-free"></i>Free</span><span>' + icon("truck") + "Delivery</span></div></div>" +
@@ -2164,9 +2244,10 @@
     },
 
     /* calendar & crews */
-    "cal-month"(el) { ui.calMonth = shiftMonth(ui.calMonth, +el.dataset.step); render(); },
-    "cal-today"() { ui.calMonth = monthKey(today()); render(); },
+    "car-step"(el) { carStep(+el.dataset.step); },
+    "cal-today"() { const months = calMonths(); carStep(months.indexOf(monthKey(today())) - months.indexOf(ui.calMonth)); },
     "cal-day"(el, e) {
+      hideHoverPop();
       // laptop: the hover list already shows; a click (or a tap on a phone) opens it as a pop-up
       openSheet({ type: "daylist", d: el.dataset.d });
     },
@@ -2178,7 +2259,7 @@
       if (location.hash === "#/project/" + el.dataset.id) render(); else location.hash = "#/project/" + el.dataset.id;
     },
     "pc-month"(el) { ui.projCalMonth = shiftMonth(ui.projCalMonth, +el.dataset.step); if (ui.sheet && ui.sheet.type === "panel") renderSheet(); render(); },
-    "pc-day"(el) { openSheet({ type: "pday", d: el.dataset.d, pid: route().id }); },
+    "pc-day"(el) { hideHoverPop(); openSheet({ type: "pday", d: el.dataset.d, pid: route().id }); },
     "pc-back"() { openSheet({ type: "panel", g: "project", t: "cal" }); },
     "go-bills"() { ui.tile.money = "bills"; ui.pendingPanel = isPhone() ? { g: "money", t: "bills" } : null; location.hash = "#/money"; },
     "open-assign"(el) { if (!S.crews.length || !S.projects.length) return toast("Add a crew and a project first.", "alert"); openSheet({ type: "assign", d: el && el.dataset.d }); },
@@ -2283,6 +2364,16 @@
     fn(el, e);
   });
 
+  // floating hover list for calendar days (only where a mouse can hover)
+  const canHover = () => window.matchMedia("(hover: hover) and (min-width: 761px)").matches;
+  document.addEventListener("mouseover", (e) => {
+    if (!canHover()) return;
+    const pop = $("#hoverPop");
+    if (pop && pop.contains(e.target)) { clearTimeout(hoverTmr); return; }
+    const el = e.target.closest("[data-hover]");
+    if (el && !(e.target.closest(".cm-bar")) && !document.querySelector(".cal-car.dragging")) { clearTimeout(hoverTmr); hoverTmr = setTimeout(() => showHoverPop(el), 120); return; }
+    clearTimeout(hoverTmr); hoverTmr = setTimeout(hideHoverPop, 200);
+  });
   document.addEventListener("input", (e) => {
     const el = e.target;
     if (el.dataset.f && ui.sheet) {

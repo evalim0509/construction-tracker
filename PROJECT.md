@@ -183,7 +183,7 @@ one are clocked in by the site manager with a photo, as before.
 ## 7. How it works (technical)
 
 - **No build step.** `index.html` loads `styles.css`, `three.min.js` (3D library, MIT, bundled locally), `factory3d.js`, `sample-data.js` and `app.js`.
-- **Updates reach phones straight away:** `index.html` links every file with a version number (`app.js?v=0.6.0`). Bump it on each release so browsers don't keep showing an old cached copy (GitHub Pages lets browsers cache files for 10 minutes).
+- **Updates reach phones straight away:** `index.html` links every file with a version number (`app.js?v=0.6.1`). Bump it on each release so browsers don't keep showing an old cached copy (GitHub Pages lets browsers cache files for 10 minutes).
 - **Data:** everything except photos is one JSON object in `localStorage` (`sitebook-data-v1`). Photos are compressed to ~720px JPEG and kept in **IndexedDB** (`sitebook-photos`).
 - **Screens** are functions returning HTML; clicks are handled in one place through `data-action` attributes.
 - **3D buildings** (`factory3d.js`): each project gets its own randomly generated factory (sawtooth roof, silos) or warehouse (gable roof, loading docks), seeded by the project id. The model shows progress: steel frame → walls going up (teal) → finished, with a tower crane until 92%. One shared WebGL view plus one for still thumbnails. Falls back to a line drawing if WebGL is not available.
@@ -248,6 +248,14 @@ Site manager only worker has no phone                             → neutral, n
 11. **e-Invoicing (LHDN MyInvois)** is being phased in. Accountants will ask for supplier TIN and e-invoice numbers. Plan fields for it before production.
 
 ## 9. Change log
+
+### v0.6.1 — 21 Nov 2026 — swipeable calendar
+Client feedback: "date numbers slightly larger, project text and coloured line slightly smaller; swipe horizontally like a carousel; show November smaller with December fully next to it and a little of January, with a smooth swiping motion."
+- **Months sit side by side in a carousel.** Laptop: two full months plus a slice of the next. Phone: one month plus a slice of the next (two would be too small to read).
+- **Swipe** with a finger or trackpad (snaps to the start of a month), **drag** with a mouse (settles smoothly on the nearest month), or use the **‹ ›** arrows and **Today** (smooth slide). The calendar remembers which month you were on.
+- The carousel covers 3 months back to 11 months ahead.
+- **Date numbers are larger** (15px, was 13px). **Project bars are thinner** (18px, was 22px) with smaller text (10.5px). Bars now stop at the end of each month, and the days from neighbouring months are left blank instead of greyed out.
+- The hover list is now a single floating box, so it is never cut off at the carousel edges.
 
 ### v0.6.0 — 21 Nov 2026 — simple owner home, calendar with project bars, project calendars
 Client feedback: "the management Today page looks like a standard web dashboard: complicated, too many things, too many tabs, I don't know what to press. Calendar: each day should show which projects are running; on hover a short point list of projects and crews; tap a project to open its project calendar, which shows crews available vs used as a coloured bar, and material details with stock." Each change was approved one by one:

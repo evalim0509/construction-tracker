@@ -796,6 +796,24 @@ button.back { border: 0; background: none; padding: 0; cursor: pointer; font: in
 .pc-legend span { display: inline-flex; align-items: center; gap: 6px; }
 .pc-legend svg { width: 14px; height: 14px; color: var(--blue); }
 
+
+/* ---------- Swipeable month carousel (v0.6.1) ---------- */
+.cal-car { display: grid; grid-auto-flow: column; grid-auto-columns: calc((100% - 32px) / 2.12); gap: 16px; overflow-x: auto; overflow-y: hidden;
+  scroll-snap-type: x mandatory; overscroll-behavior-x: contain; scrollbar-width: none; padding: 1px 1px 6px; -webkit-overflow-scrolling: touch; cursor: grab; }
+.cal-car::-webkit-scrollbar { display: none; }
+.cal-car.dragging { scroll-snap-type: none; cursor: grabbing; user-select: none; }
+.cal-car.dragging .cm-bar, .cal-car.dragging .cm-day { pointer-events: none; }
+.cal-car > .cm-month { scroll-snap-align: start; margin: 0; min-width: 0; }
+.cal-car > .card + .card { margin-top: 0; }
+.cm-title { font-size: 17px; font-weight: 600; margin: 2px 4px 8px; }
+.cm-day .cm-n { font-size: 15px; width: 28px; height: 28px; }
+.cm-bar { font-size: 10.5px; line-height: 18px; padding: 0 6px; box-shadow: inset 2px 0 0 var(--c); border-radius: 3px; }
+.cm-free { font-size: 10.5px; }
+.cm-day.out { background: none; cursor: default; }
+.cm-day.out:hover { background: none; }
+.float-pop { position: fixed; display: block; z-index: 70; top: 0; left: 0; }
+.float-pop[hidden] { display: none; }
+
 /* ---------- Bottom nav (phones) ---------- */
 .bottomnav { display: none; }
 .fab { display: none; }
@@ -866,6 +884,11 @@ button.back { border: 0; background: none; padding: 0; cursor: pointer; font: in
   .cal-month { min-width: 0; font-size: 18px; }
   .day-panel { margin-top: 0; }
   .mobile-only { display: flex !important; }
+  .cal-car { grid-auto-columns: 88%; gap: 10px; margin: 0 -16px; padding: 1px 16px 6px; scroll-padding: 0 16px; }
+  .cal-car > .cm-month { margin: 0; }
+  .cm-day .cm-n { font-size: 14px; width: 24px; height: 24px; }
+  .cm-bar { font-size: 9.5px; line-height: 16px; padding: 0 3px; }
+
   .cm { padding: 6px 4px 8px; margin: 0 -8px; }
   .cm-day { padding: 2px 3px; min-height: 54px; }
   .cm-n { width: 20px; height: 20px; font-size: 12px; }
