@@ -16,7 +16,7 @@ The app only accepts a progress photo taken in the **last 10 minutes** (anti-che
 
 ## Steps
 1. Open **Klang Warehouse** → **Blueprint** tab → **Upload a blueprint** → choose the PDF → pick **Page 1** → name it *Ground floor*.
-2. **Set scale:** tap both ends of the **48 000** dimension line at the top, type **48**.
+2. **Set scale:** tap both ends of the **48 000** dimension line at the top, type **48** (metres; if you type 48000 the app reads it as millimetres).
 3. **Trace** using `tracing-guide.png`: Wall tool, tap corners 1 → 2 → 3 → 4 → 1, then Stop (W1–W4); then W5–W9; Pipe tool for P1–P4; Column tool on the 18 black squares.
 4. (Optional) **Add floor** → PDF page 2 → *Level 1*, trace its 5 walls. Check the 3D view stacks it on top.
 5. **Progress photo** → choose **Wall 1** → upload `W1-wall-1-blockwork.jpg` → Save. Then `W1-wall-2-plastered.jpg`, then `W1-wall-3-painted.jpg` (the last one goes to management because Wall 1 reaches 100%).

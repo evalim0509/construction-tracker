@@ -79,7 +79,7 @@
     fl.forEach((f) => f.parts.forEach((pt) => { minX = Math.min(minX, pt.x1, pt.x2); maxX = Math.max(maxX, pt.x1, pt.x2); minZ = Math.min(minZ, pt.z1, pt.z2); maxZ = Math.max(maxZ, pt.z1, pt.z2); }));
     if (!isFinite(minX)) { minX = 0; maxX = 20; minZ = 0; maxZ = 12; }
     const cx = (minX + maxX) / 2, cz = (minZ + maxZ) / 2;
-    const ground = new T.Mesh(new T.PlaneGeometry(400, 400), new T.ShadowMaterial({ opacity: 0.12 }));
+    const ground = new T.Mesh(new T.PlaneGeometry(Math.max(400, (maxX - minX) * 4), Math.max(400, (maxZ - minZ) * 4)), new T.ShadowMaterial({ opacity: 0.12 }));
     ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; g.add(ground);
     fl.forEach((f) => {
       const y0 = f.elev || 0;
@@ -351,6 +351,8 @@
     const dir = new window.THREE.Vector3(0.74, 0.5, 0.86).normalize();
     cam.position.set(dir.x * d, dir.y * d + (model.userData.cy || 3), dir.z * d);
     cam.lookAt(0, model.userData.cy || 3, 0);
+    // near/far follow the model's size, so a building of any size stays inside the view
+    cam.near = Math.max(0.05, d / 2000); cam.far = Math.max(400, d + r * 4); cam.updateProjectionMatrix();
   }
 
   /* ---------- live view (one shared renderer) ---------- */

@@ -202,7 +202,7 @@ Honest constraints agreed before building:
 ## 7. How it works (technical)
 
 - **No build step.** `index.html` loads `styles.css`, `three.min.js` (3D library, MIT, bundled locally), `factory3d.js`, `sample-data.js` and `app.js`.
-- **Updates reach phones straight away:** `index.html` links every file with a version number (`app.js?v=0.9.3`). Bump it on each release so browsers don't keep showing an old cached copy (GitHub Pages lets browsers cache files for 10 minutes).
+- **Updates reach phones straight away:** `index.html` links every file with a version number (`app.js?v=0.9.4`). Bump it on each release so browsers don't keep showing an old cached copy (GitHub Pages lets browsers cache files for 10 minutes).
 - **Data:** everything except photos is one JSON object in `localStorage` (`sitebook-data-v1`). Photos are compressed to ~720px JPEG and kept in **IndexedDB** (`sitebook-photos`).
 - **Screens** are functions returning HTML; clicks are handled in one place through `data-action` attributes.
 - **3D buildings** (`factory3d.js`): each project gets its own randomly generated factory (sawtooth roof, silos) or warehouse (gable roof, loading docks), seeded by the project id. The model shows progress: steel frame → walls going up (teal) → finished, with a tower crane until 92%. One shared WebGL view plus one for still thumbnails. Falls back to a line drawing if WebGL is not available.
@@ -267,6 +267,11 @@ Site manager only worker has no phone                             → neutral, n
 11. **e-Invoicing (LHDN MyInvois)** is being phased in. Accountants will ask for supplier TIN and e-invoice numbers. Plan fields for it before production.
 
 ## 9. Change log
+
+### v0.9.4 — 22 Nov 2026 — scale typed in millimetres no longer blanks the 3D
+Client: 3D still blank after the v0.9.3 fix, on the warehouse traced from the test PDF.
+- **Cause:** the drawing labels dimensions in millimetres ("48 000"), so typing **48000** in "Set scale" made the app think the warehouse was 48 km long. The 3D camera only drew up to 400 m away, so the building was outside the view: a blank box. Reproduced exactly (typed 48000 → nothing drawn; 48 → building).
+- **Fixes:** (1) "Set scale" reads 500 or more as millimetres (48000 → 48 m) and says so; the hint explains millimetres; the confirmation shows the drawing's width in metres so a wrong scale is obvious. (2) Saved plans wider than 2 km are repaired on load (scale ÷ 1000), so the client's traced plan works without re-tracing. (3) The 3D camera's near/far distances now follow the model's size, so a building of any size stays in view. (4) The 3D view shows the building's size ("Building about 48 × 24 m").
 
 ### v0.9.3 — 22 Nov 2026 — 3D comes back after taking a photo on an iPhone
 Client test (iPhone): after approving Wall 1's blockwork photo, the 3D box was still completely empty (not even the floor).

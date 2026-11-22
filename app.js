@@ -137,7 +137,11 @@
     S.projects.forEach(planPhases);
     S.settings.partTypes = S.settings.partTypes || JSON.parse(JSON.stringify(PART_TYPES_DEFAULT));
     if (S.settings.bigJumpPct == null) S.settings.bigJumpPct = 10;
-    S.projects.forEach((p) => { p.plans = p.plans || []; p.parts = p.parts || []; });
+    S.projects.forEach((p) => {
+      p.plans = p.plans || []; p.parts = p.parts || [];
+      // a drawing more than 2 km wide is impossible here: the scale was typed in millimetres (e.g. 48000 for 48 m)
+      p.plans.forEach((pl) => { if (pl.scale && pl.w * pl.scale > 2000) pl.scale /= 1000; });
+    });
   }
   /* Phases: planned dates (planStart/planEnd) and real dates (startedOn/doneOn).
      The plan is filled in once from the project's original dates, split by a typical share per phase;
@@ -1599,7 +1603,8 @@
     const floorParts = p.parts.filter((x) => x.planId === pl.id);
     let body = "";
     if (mode === "3d") {
-      body = hasPlan3D(p) ? '<div class="card"><div class="plan-3d" data-3d="' + p.id + '"></div><p class="small muted mt-8">Drag to turn. Tap a wall, pipe or column to see its photos. See-through = not started, grey blocks = blockwork, smooth grey = plastered, cream = painted. Amber edges = a photo is waiting for management approval (it counts once approved).</p></div>' : '<div class="card">' + empty("Trace some parts first, then they show here in 3D.") + "</div>";
+      const ext = (() => { let a = Infinity, b = -Infinity, c = Infinity, d = -Infinity; p.parts.forEach((x) => { const k = (planOf(p, x) || {}).scale || DEFAULT_MPP; [x.a, x.b].filter(Boolean).forEach((q) => { a = Math.min(a, q[0] * k); b = Math.max(b, q[0] * k); c = Math.min(c, q[1] * k); d = Math.max(d, q[1] * k); }); }); return isFinite(a) ? Math.round(b - a) + " × " + Math.round(d - c) + " m" : ""; })();
+      body = hasPlan3D(p) ? '<div class="card"><div class="plan-3d" data-3d="' + p.id + '"></div><p class="small muted mt-8">' + (ext ? "Building about " + ext + ". " : "") + "Drag to turn. Tap a wall, pipe or column to see its photos. See-through = not started, grey blocks = blockwork, smooth grey = plastered, cream = painted. Amber edges = a photo is waiting for management approval (it counts once approved).</p></div>" : '<div class="card">' + empty("Trace some parts first, then they show here in 3D.") + "</div>";
     } else if (mode === "parts" && edit) {
       const tool = ui.planTool || "wall";
       const tb = (k, l) => '<button class="fchip ' + (tool === k ? "on" : "") + '" data-action="plan-tool" data-t="' + k + '">' + l + "</button>";
@@ -2448,7 +2453,7 @@
     },
     planscale(s) {
       return sheetHead("Set the scale") + '<p class="muted">You drew a line of ' + Math.round(s.px) + " px on the blueprint. How long is it in real life?</p>" +
-        '<label class="field"><span>Real length (metres)</span><input class="input" type="number" step="0.01" min="0.1" data-f="m" value="' + esc(val("m", "")) + '" autofocus placeholder="e.g. 6.00"></label>' +
+        '<label class="field"><span>Real length in metres</span><input class="input" type="number" step="0.01" min="0.1" data-f="m" value="' + esc(val("m", "")) + '" autofocus placeholder="e.g. 48"><small class="muted">Drawings usually show millimetres: 48 000 on the drawing = 48 m. If you type the millimetres, the app converts them.</small></label>' +
         errBox() + '<div class="sheet-foot"><button class="btn btn-primary btn-big" data-action="plan-scale-save">' + icon("check") + "Save scale</button></div>";
     },
     part(s) {
@@ -3136,11 +3141,15 @@
       save(); render();
     },
     "plan-scale-save"() {
-      const s = ui.sheet, m = parseFloat(F().m), p = project(s.pid), pl = p.plans.find((x) => x.id === s.plan);
+      const s = ui.sheet, p = project(s.pid), pl = p.plans.find((x) => x.id === s.plan);
+      let m = parseFloat(String(F().m || "").replace(/[\s,]/g, ""));
       if (!(m > 0)) return fail("Type the real length in metres.");
+      // drawings show millimetres: 500 or more is read as millimetres (48 000 → 48 m)
+      const mmNote = m >= 500 ? (m = m / 1000, " (read as millimetres: " + m + " m)") : "";
       pl.scale = m / s.px;
+      s.note = mmNote;
       log("plan", { projectId: p.id, value: "set the scale of " + esc(pl.name) + ": " + m + " m = " + Math.round(s.px) + " px (" + esc(p.name) + ")" });
-      ui.planTool = "wall"; save(); closeSheet(); render(); toast("Scale saved. Now trace the walls: tap one end, then the other.");
+      ui.planTool = "wall"; save(); closeSheet(); render(); toast("Scale saved" + mmNote + ". The drawing is about " + Math.round(pl.w * pl.scale) + " m wide. Now trace the walls: tap one end, then the other.");
     },
     "plan-undo"(el) {
       const p = project(el.dataset.pid), pl = p.plans.find((x) => x.id === (ui.planFloor || {})[p.id]) || p.plans.slice().sort((a, b) => a.level - b.level)[0];
