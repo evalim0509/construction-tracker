@@ -354,11 +354,37 @@
   }
 
   /* ---------- live view (one shared renderer) ---------- */
-  const live = { renderer: null, scene: null, camera: null, model: null, key: "", host: null, raf: 0, rotY: -0.5, drag: null, visible: true, ro: null, io: null, onPick: null };
+  const live = { renderer: null, scene: null, camera: null, model: null, key: "", host: null, raf: 0, rotY: -0.5, drag: null, ro: null, onPick: null, opts: null, lost: false };
+
+  // on screen? measured each frame (an IntersectionObserver can lag behind on iPhones when pages change)
+  function onScreen(el) { const r = el.getBoundingClientRect(); return r.width > 0 && r.bottom > 0 && r.top < (window.innerHeight || 800); }
+
+  /* Phones throw away the 3D drawing surface (WebGL context) when another app takes over, e.g. the camera
+     for a photo. A lost surface draws nothing, so we drop it and build a fresh one. */
+  function dropRenderer() {
+    if (!live.renderer) return;
+    cancelAnimationFrame(live.raf); live.raf = 0;
+    const cv = live.renderer.domElement;
+    if (cv.parentNode) cv.parentNode.removeChild(cv);
+    if (live.ro) live.ro.disconnect();
+    try { live.renderer.dispose(); } catch (e) { /* already gone */ }
+    if (live.model) { try { disposeGroup(live.model); } catch (e) { /* already gone */ } }
+    Object.assign(live, { renderer: null, scene: null, camera: null, model: null, key: "", host: null, ro: null, lost: false });
+  }
+  function revive() {   // rebuild the 3D after a lost surface, if it is on the page
+    const host = live.host, opts = live.opts;
+    dropRenderer();
+    if (host && host.isConnected && opts) attach(host, opts);
+  }
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) return;
+    if (live.renderer && (live.lost || live.renderer.getContext().isContextLost())) setTimeout(revive, 150);
+    if (thumbR && thumbR.getContext().isContextLost()) { try { thumbR.dispose(); } catch (e) { /* gone */ } thumbR = null; }
+  });
 
   function loop() {
     live.raf = requestAnimationFrame(loop);
-    if (!live.host || !live.host.isConnected || !live.visible || document.hidden) return;
+    if (!live.renderer || live.lost || !live.host || !live.host.isConnected || document.hidden || !onScreen(live.host)) return;
     const reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     if (!live.drag && !reduce && !live.onPick) live.rotY += 0.0018;
     if (live.model) {
@@ -377,10 +403,20 @@
     if (live.model) placeCamera(live.camera, live.model, w / h);
   }
 
+  // never leave an empty box: if 3D cannot start, say so (and how to retry)
   function attach(host, opts) {
+    try { attach3D(host, opts); }
+    catch (e) {
+      dropRenderer();
+      if (host) host.innerHTML = '<div style="height:100%;display:grid;place-items:center;text-align:center;padding:16px;color:#5B6873;font-size:14px">3D could not start on this device (' + String(e && e.message || e).replace(/[<>&]/g, "") + ').<br>Close other tabs or reload the page to try again.</div>';
+    }
+  }
+  function attach3D(host, opts) {
     if (!host) return;
     if (!hasGL) { host.innerHTML = fallbackSVG(opts); return; }
     const T = window.THREE;
+    if (live.renderer && (live.lost || live.renderer.getContext().isContextLost())) dropRenderer();
+    live.opts = opts;
     if (!live.renderer) {
       live.renderer = makeRenderer(false);
       live.scene = makeScene();
@@ -403,7 +439,7 @@
       const end = () => { live.drag = null; };
       cv.addEventListener("pointerup", end); cv.addEventListener("pointercancel", end);
       live.ro = new ResizeObserver(resize);
-      live.io = new IntersectionObserver((ents) => { live.visible = ents.some((x) => x.isIntersecting); });
+      cv.addEventListener("webglcontextlost", (e) => { e.preventDefault(); live.lost = true; setTimeout(() => { if (!document.hidden && live.lost) revive(); }, 400); });
       loop();
     }
     live.onPick = opts.onPick || null;
@@ -416,9 +452,9 @@
       resize();
     }
     if (live.host !== host) {
-      if (live.host) { live.ro.unobserve(live.host); live.io.unobserve(live.host); }
+      if (live.host) live.ro.unobserve(live.host);
       live.host = host;
-      live.ro.observe(host); live.io.observe(host);
+      live.ro.observe(host);
     }
     if (live.renderer.domElement.parentNode !== host) host.appendChild(live.renderer.domElement);
     resize();
@@ -433,6 +469,7 @@
     if (thumbCache[key]) return thumbCache[key];
     if (!hasGL) return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(fallbackSVG(opts));
     const T = window.THREE;
+    if (thumbR && thumbR.getContext().isContextLost()) { try { thumbR.dispose(); } catch (e) { /* gone */ } thumbR = null; }
     if (!thumbR) {
       thumbR = makeRenderer(true);
       thumbR.setPixelRatio(1.5);

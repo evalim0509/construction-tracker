@@ -202,7 +202,7 @@ Honest constraints agreed before building:
 ## 7. How it works (technical)
 
 - **No build step.** `index.html` loads `styles.css`, `three.min.js` (3D library, MIT, bundled locally), `factory3d.js`, `sample-data.js` and `app.js`.
-- **Updates reach phones straight away:** `index.html` links every file with a version number (`app.js?v=0.9.2`). Bump it on each release so browsers don't keep showing an old cached copy (GitHub Pages lets browsers cache files for 10 minutes).
+- **Updates reach phones straight away:** `index.html` links every file with a version number (`app.js?v=0.9.3`). Bump it on each release so browsers don't keep showing an old cached copy (GitHub Pages lets browsers cache files for 10 minutes).
 - **Data:** everything except photos is one JSON object in `localStorage` (`sitebook-data-v1`). Photos are compressed to ~720px JPEG and kept in **IndexedDB** (`sitebook-photos`).
 - **Screens** are functions returning HTML; clicks are handled in one place through `data-action` attributes.
 - **3D buildings** (`factory3d.js`): each project gets its own randomly generated factory (sawtooth roof, silos) or warehouse (gable roof, loading docks), seeded by the project id. The model shows progress: steel frame → walls going up (teal) → finished, with a tower crane until 92%. One shared WebGL view plus one for still thumbnails. Falls back to a line drawing if WebGL is not available.
@@ -267,6 +267,12 @@ Site manager only worker has no phone                             → neutral, n
 11. **e-Invoicing (LHDN MyInvois)** is being phased in. Accountants will ask for supplier TIN and e-invoice numbers. Plan fields for it before production.
 
 ## 9. Change log
+
+### v0.9.3 — 22 Nov 2026 — 3D comes back after taking a photo on an iPhone
+Client test (iPhone): after approving Wall 1's blockwork photo, the 3D box was still completely empty (not even the floor).
+- **Cause:** taking a photo opens the camera app; iOS then throws away the browser's 3D drawing surface (WebGL context) to save memory. The app kept reusing that dead surface, so nothing was drawn until the page was reloaded. Reproduced in the test browser by forcing the same loss: the 3D box went from ~19 000 drawn pixels to an empty frame.
+- **Fix:** when the surface is lost (or found lost when the page becomes visible again or the 3D is opened), the app drops it and builds a fresh one automatically, both for the live 3D view and the project thumbnails. The "is the 3D on screen" check now measures the page directly each frame instead of relying on a browser observer that can lag on iPhones. If 3D cannot start at all, the box now says so and how to retry instead of staying empty.
+- Tested: after a forced loss, the 3D redraws in place within half a second, and after switching views; project page model, thumbnails and tapping parts in 3D still work.
 
 ### v0.9.2 — 22 Nov 2026 — 3D view no longer blank for a newly traced plan
 Client test: "uploaded the blueprint, traced it, took the Wall 1 blockwork photo, but the 3D model is blank."
