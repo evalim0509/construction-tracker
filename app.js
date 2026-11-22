@@ -1504,11 +1504,11 @@
         const n = ptype(x.type).stages.length, s = partStage(x);
         const look = s === 0 ? 0 : s >= n - 1 ? 3 : s === 1 ? 1 : 2;
         const b = x.b || x.a;
-        f.parts.push({ id: x.id, type: x.type, x1: x.a[0] * k, z1: x.a[1] * k, x2: b[0] * k, z2: b[1] * k, look, h: pl.height || 4 });
+        f.parts.push({ id: x.id, type: x.type, x1: x.a[0] * k, z1: x.a[1] * k, x2: b[0] * k, z2: b[1] * k, look, h: pl.height || 4, pending: !!partPending(x) });
       });
       return f;
     });
-    const key = plans.map((pl) => pl.id + pl.scale + pl.height).join() + "|" + (p.parts || []).map((x) => x.id + partStage(x) + x.a + x.b).join("|");
+    const key = plans.map((pl) => pl.id + pl.scale + pl.height).join() + "|" + (p.parts || []).map((x) => x.id + partStage(x) + (partPending(x) ? "w" : "") + x.a + x.b).join("|");
     return { plan: { floors }, planKey: String(hashStr(key)) };
   }
   const hasPlan3D = (p) => !!(p.parts && p.parts.length);
@@ -1599,7 +1599,7 @@
     const floorParts = p.parts.filter((x) => x.planId === pl.id);
     let body = "";
     if (mode === "3d") {
-      body = hasPlan3D(p) ? '<div class="card"><div class="plan-3d" data-3d="' + p.id + '"></div><p class="small muted mt-8">Drag to turn. Tap a wall, pipe or column to see its photos. Walls rise as they progress: outline = not started, grey blocks = blockwork, smooth grey = plastered, cream = painted.</p></div>' : '<div class="card">' + empty("Trace some parts first, then they show here in 3D.") + "</div>";
+      body = hasPlan3D(p) ? '<div class="card"><div class="plan-3d" data-3d="' + p.id + '"></div><p class="small muted mt-8">Drag to turn. Tap a wall, pipe or column to see its photos. See-through = not started, grey blocks = blockwork, smooth grey = plastered, cream = painted. Amber edges = a photo is waiting for management approval (it counts once approved).</p></div>' : '<div class="card">' + empty("Trace some parts first, then they show here in 3D.") + "</div>";
     } else if (mode === "parts" && edit) {
       const tool = ui.planTool || "wall";
       const tb = (k, l) => '<button class="fchip ' + (tool === k ? "on" : "") + '" data-action="plan-tool" data-t="' + k + '">' + l + "</button>";

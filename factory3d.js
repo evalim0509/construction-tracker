@@ -59,11 +59,15 @@
     const T = window.THREE;
     const g = new T.Group();
     const edgeMat = new T.LineBasicMaterial({ color: COLORS.edge, transparent: true, opacity: 0.18 });
+    // not started: see-through wall with clear edges; waiting for approval: amber edges
+    const ghostEdge = new T.LineBasicMaterial({ color: 0x5B6873, transparent: true, opacity: 0.55 });
+    const waitEdge = new T.LineBasicMaterial({ color: 0xD08A2E });
+    const footMat = (pend) => mat(pend ? "footW" : "foot", () => std(pend ? 0xD08A2E : 0x7D8A94));
     const mats = {};
     const mat = (key, make) => mats[key] || (mats[key] = make());
     const std = (hex, extra) => { const m = new T.MeshStandardMaterial(Object.assign({ roughness: 0.9, metalness: 0.02 }, extra || {})); m.color.setHex(hex).convertSRGBToLinear(); return m; };
     const WALL = [
-      () => mat("w0", () => std(0xB8C1C8, { transparent: true, opacity: 0.55 })),
+      () => mat("w0", () => std(0xA9B6C0, { transparent: true, opacity: 0.16, depthWrite: false })),
       () => mat("w1", () => { const m = std(0xFFFFFF); m.map = blockTexture(); return m; }),
       () => mat("w2", () => std(0xC3C9CE)),
       () => mat("w3", () => std(0xEBDDC2))
@@ -87,7 +91,11 @@
         const len = Math.max(0.05, Math.hypot(x2 - x1, z2 - z1)), ang = Math.atan2(z2 - z1, x2 - x1);
         let m;
         if (pt.type === "wall") {
-          const h = pt.look > 0 ? (pt.h || 4) : 0.06;
+          const h = pt.h || 4;
+          if (pt.look === 0) {   // footprint strip on the floor, so the plan reads even from far away
+            const foot = new T.Mesh(new T.BoxGeometry(len, 0.12, 0.3), footMat(pt.pending));
+            foot.position.set((x1 + x2) / 2, y0 + 0.06, (z1 + z2) / 2); foot.rotation.y = -ang; foot.userData.partId = pt.id; g.add(foot);
+          }
           m = new T.Mesh(new T.BoxGeometry(len, h, 0.22), WALL[Math.min(3, pt.look)]());
           if (pt.look === 1) { m.material = m.material.clone(); m.material.map = blockTexture().clone(); m.material.map.needsUpdate = true; m.material.map.repeat.set(len / 1.6, h / 0.8); }
           m.position.set((x1 + x2) / 2, y0 + h / 2, (z1 + z2) / 2);
@@ -101,21 +109,22 @@
           g.add(wrap);
           return;
         } else {
-          const h = pt.look > 0 ? (pt.h || 4) * (pt.look === 1 ? 0.6 : 1) : 0.06;
-          m = new T.Mesh(new T.BoxGeometry(0.45, h, 0.45), mat("c" + pt.look + "-" + h, () => std(COL[Math.min(3, pt.look)], pt.look ? {} : { transparent: true, opacity: 0.6 })));
+          const h = (pt.h || 4) * (pt.look === 1 ? 0.6 : 1);
+          m = new T.Mesh(new T.BoxGeometry(0.45, h, 0.45), mat("c" + pt.look + "-" + h, () => std(COL[Math.min(3, pt.look)], pt.look ? {} : { transparent: true, opacity: 0.25, depthWrite: false })));
           m.position.set(x1, y0 + h / 2, z1);
           top = Math.max(top, y0 + h);
         }
         m.castShadow = true; m.receiveShadow = true;
         m.userData.partId = pt.id;
-        if (pt.look > 0) m.add(new T.LineSegments(new T.EdgesGeometry(m.geometry, 20), edgeMat));
+        m.add(new T.LineSegments(new T.EdgesGeometry(m.geometry, 20), pt.pending ? waitEdge : pt.look > 0 ? edgeMat : ghostEdge));
+        if (pt.look === 0) m.castShadow = false;
         g.add(m);
       });
     });
     const W = maxX - minX, D = maxZ - minZ;
     g.userData.radius = Math.sqrt(Math.pow(W / 2 + 3, 2) + Math.pow(D / 2 + 3, 2) + Math.pow(Math.max(4, top) / 2, 2));
     g.userData.cy = Math.max(2, top) * 0.3;
-    g.userData.zoom = 0.6;   // fill more of the view than the generic model
+    g.userData.zoom = 0.72;   // fill more of the view than the generic model, without cutting it off
     return g;
   }
 
@@ -336,7 +345,9 @@
     const r = model.userData.radius || 20;
     const vf = (cam.fov * Math.PI) / 180;
     const hf = 2 * Math.atan(Math.tan(vf / 2) * aspect);
-    const d = (r / Math.sin(Math.min(vf, hf) / 2)) * (zoom || model.userData.zoom || 0.82);
+    // blueprint models: fit the whole building (a long building on a tall, narrow phone view needs the full sphere)
+    const z = zoom || (model.userData.zoom ? (aspect < 1 ? 1.0 : model.userData.zoom) : 0.82);
+    const d = (r / Math.sin(Math.min(vf, hf) / 2)) * z;
     const dir = new window.THREE.Vector3(0.74, 0.5, 0.86).normalize();
     cam.position.set(dir.x * d, dir.y * d + (model.userData.cy || 3), dir.z * d);
     cam.lookAt(0, model.userData.cy || 3, 0);

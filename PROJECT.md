@@ -194,7 +194,7 @@ Honest constraints agreed before building:
 | BP2 | How is progress measured? | **Fixed stages per type, each worth a %**: Wall: Not started 0 → Blockwork 40 → Plastered 70 → Painted 100. Pipe: Laid 50 → Pressure-tested 80 → Covered 100. Column: Formwork 30 → Concrete poured 80 → Finished 100. Editable in Settings |
 | BP3 | Who decides the stage? | **Site manager picks; rules check the photo**, including a simple colour check (e.g. "Painted" but the wall looks raw grey → sent to management to confirm) |
 | BP4 | Safeguards (all chosen) | **Fresh camera photo on site** (no gallery; time + GPS within the site distance) · **one stage at a time** (going back needs a reason) · **photo quality + reuse check** (too blurry, too dark, same photo as before) · **management approves big jumps** (a part reaching 100%, or >10% of the project in a day) |
-| BP5 | 3D model | **Built from the traced walls; walls rise as they progress**: not started = faint outline, blockwork = grey block, plastered = smooth light grey, painted = finished colour; pipes as coloured lines; tap a wall to see its photos |
+| BP5 | 3D model | **Built from the traced walls; walls rise as they progress**: not started = see-through outline at full height (v0.9.2, was a faint floor outline), waiting for approval = amber edges, blockwork = grey block, plastered = smooth light grey, painted = finished colour; pipes as coloured lines; tap a wall to see its photos |
 | BP6 | Roll-up | **Weighted by size, per phase**: each part type belongs to a phase (walls → Roofing & wall cladding, pipes → M&E, columns → Steel structure); phase % = parts' progress weighted by length; feeds the phase timeline and project %; a phase can be finished only when its parts reach 100% |
 | BP7 | Picking the part | **Dropdown grouped by type, with search, plus a mini plan** highlighting the chosen part (or tap it on the plan) |
 | BP8 | Blueprint files | **PDF or image, one plan per floor** (Ground, Level 1…); the 3D stacks floors |
@@ -202,7 +202,7 @@ Honest constraints agreed before building:
 ## 7. How it works (technical)
 
 - **No build step.** `index.html` loads `styles.css`, `three.min.js` (3D library, MIT, bundled locally), `factory3d.js`, `sample-data.js` and `app.js`.
-- **Updates reach phones straight away:** `index.html` links every file with a version number (`app.js?v=0.9.1`). Bump it on each release so browsers don't keep showing an old cached copy (GitHub Pages lets browsers cache files for 10 minutes).
+- **Updates reach phones straight away:** `index.html` links every file with a version number (`app.js?v=0.9.2`). Bump it on each release so browsers don't keep showing an old cached copy (GitHub Pages lets browsers cache files for 10 minutes).
 - **Data:** everything except photos is one JSON object in `localStorage` (`sitebook-data-v1`). Photos are compressed to ~720px JPEG and kept in **IndexedDB** (`sitebook-photos`).
 - **Screens** are functions returning HTML; clicks are handled in one place through `data-action` attributes.
 - **3D buildings** (`factory3d.js`): each project gets its own randomly generated factory (sawtooth roof, silos) or warehouse (gable roof, loading docks), seeded by the project id. The model shows progress: steel frame → walls going up (teal) → finished, with a tower crane until 92%. One shared WebGL view plus one for still thumbnails. Falls back to a line drawing if WebGL is not available.
@@ -267,6 +267,11 @@ Site manager only worker has no phone                             → neutral, n
 11. **e-Invoicing (LHDN MyInvois)** is being phased in. Accountants will ask for supplier TIN and e-invoice numbers. Plan fields for it before production.
 
 ## 9. Change log
+
+### v0.9.2 — 22 Nov 2026 — 3D view no longer blank for a newly traced plan
+Client test: "uploaded the blueprint, traced it, took the Wall 1 blockwork photo, but the 3D model is blank."
+- **Cause:** parts with no approved progress were drawn as a 6 cm light-grey strip, so a newly traced building (and a wall whose photo is still waiting for approval) was practically invisible; the camera was also framed too tight for a long building on a phone.
+- **Fix:** not-started parts are see-through walls/posts at full height with clear edges plus a dark footprint strip, so the building's shape always shows; a part with a photo **waiting for approval** gets **amber edges** (it turns into blockwork etc. once approved); on tall, narrow screens the whole building is fitted in view. The 3D help text explains the look of each stage.
 
 ### v0.9.1 — 21 Nov 2026 — test files for the Blueprint tab; reuse check fixed
 Client: "prepare a sample floor plan PDF and site images for me to upload to test the function."
