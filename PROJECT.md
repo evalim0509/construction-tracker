@@ -199,6 +199,22 @@ Honest constraints agreed before building:
 | BP7 | Picking the part | **Dropdown grouped by type, with search, plus a mini plan** highlighting the chosen part (or tap it on the plan) |
 | BP8 | Blueprint files | **PDF or image, one plan per floor** (Ground, Level 1…); the 3D stacks floors |
 
+### Accuracy review (24 Nov 2026) — decisions AC1–AC9
+The client asked for an honest assessment of what could make progress figures wrong ("accuracy is very important in construction"). Risks found, ranked, and the fix chosen for each:
+
+| # | Risk | Decision |
+|---|---|---|
+| AC1 | Data lives on one phone; iPhone Safari can wipe a site's storage after ~7 days unused; two phones = two versions | **Keep as is for the prototype.** Must be solved (online database with logins and photo storage) before real use |
+| AC2 | Nothing proves the photo shows the part picked (Wall 3 vs Wall 8) | **Keep the dropdown + mini plan, and compare each new photo with the same part's last photo**; if it looks like a different place, management checks |
+| AC3 | Gallery photos on some phones; file dates and phone clocks can be changed | **Camera inside the app**: the app opens its own camera view (no gallery or file picker on any phone) and stamps part, date, time and GPS onto the photo. Laptops review only |
+| AC4 | Indoor GPS 30–100 m off; 200 m circle covers neighbours; site set by one tap | **Pin the site on a map** (OpenStreetMap) with a boundary; photos outside it, or with GPS accuracy worse than ±50 m, go to management |
+| AC5 | Stages are all-or-nothing (a half-plastered wall shows 40% or 70%) | **Both**: long walls split into panels at the columns on them (1a, 1b…), and each photo can say how much of the panel is at the stage (¼ ½ ¾ all) |
+| AC6 | % weighted by length; every phase = 1/6; stage values are guesses | **% of contract value**: a cost per phase (from the BOQ/quotation) and a value per stage; parts weighted by area (length × height); project % = RM of work done ÷ contract value |
+| AC7 | Finger taps ±0.5 m; skewed photos of paper plans; missed or doubled walls | **All four checks**: check the scale on a second dimension (warn if > 1% off), magnifier while tapping, find doubles/gaps/tiny walls, totals per floor to compare with the drawing/BOQ |
+| AC8 | Editing stage values, deleting parts or re-tracing silently changes past progress | **Lock + monthly snapshot**: stage and phase values lock once used (changes apply from today as a new version); parts with photos can only be marked removed with a reason; a locked month-end snapshot of progress (per part, per phase, RM) |
+| AC9 | Management can approve without looking | **Side-by-side review**: Approve only after opening the new photo next to the part's last photo, with the flags and its place on the plan; time spent is recorded; no "approve all" |
+| AC10 | The colour rule is fooled by dust, shadow, light | **Keep as a soft hint** (never blocks), comparing the middle of the wall with the same area of the last photo |
+
 ## 7. How it works (technical)
 
 - **No build step.** `index.html` loads `styles.css`, `three.min.js` (3D library, MIT, bundled locally), `factory3d.js`, `sample-data.js` and `app.js`.
