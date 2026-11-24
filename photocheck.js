@@ -87,7 +87,21 @@
     let hash2 = "";
     for (let i = 0; i < 256; i += 4) hash2 += parseInt(bits2.slice(i, i + 4), 2).toString(16);
 
-    return { lum: Math.round(lum), sharp: Math.round(sharp), tex: Math.round(tex * 10) / 10, lc: Math.round(lc), sat: Math.round(sat * 100) / 100, hash, hash2, w: im.naturalWidth || im.width, h: im.naturalHeight || im.height };
+    // place layout: average colour of a 6 x 4 grid; used to tell whether two photos show the same place
+    const t3 = pixels(im, 6, 4), layout = [];
+    for (let i = 0; i < 24; i++) layout.push(t3[i * 4], t3[i * 4 + 1], t3[i * 4 + 2]);
+
+    return { layout, lum: Math.round(lum), sharp: Math.round(sharp), tex: Math.round(tex * 10) / 10, lc: Math.round(lc), sat: Math.round(sat * 100) / 100, hash, hash2, w: im.naturalWidth || im.width, h: im.naturalHeight || im.height };
+  }
+
+  // how different two places look (0 = same): colour difference of the grid cells that changed LEAST (30th
+  // percentile), so plastering or painting the wall in part of the photo does not count, but a different scene does
+  function layoutDist(a, b) {
+    if (!a || !b || a.length !== b.length) return 0;
+    const ds = [];
+    for (let i = 0; i < a.length; i += 3) ds.push(Math.hypot(a[i] - b[i], a[i + 1] - b[i + 1], a[i + 2] - b[i + 2]));
+    ds.sort((x, y) => x - y);
+    return Math.round(ds[Math.floor(ds.length * 0.3)]);
   }
 
   // number of different bits between two fingerprints (0 = same photo)
@@ -133,5 +147,5 @@
     return null;
   }
 
-  window.PhotoCheck = { analyse, hamming, exifDate };
+  window.PhotoCheck = { analyse, hamming, layoutDist, exifDate };
 })();

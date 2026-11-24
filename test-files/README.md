@@ -9,15 +9,14 @@ Sample files to try the blueprint workflow end to end. They are **for testing on
 | `tracing-guide.png` | Page 1 with the wall, pipe and column names marked, and the tracing order, so the names you trace match the photos. |
 | `site-photos/` | Progress photos (rendered, realistic lighting): Wall 1 and Wall 2 at each stage, Pipe 2 laid → pressure-tested → covered, a column formwork → poured → finished, plus two bad photos. |
 
-## Important: the photo must be "fresh"
-The app only accepts a progress photo taken in the **last 10 minutes** (anti-cheating rule), and on a phone it opens the **camera** (no gallery). So:
-- **On a laptop:** download the photos, then upload within 10 minutes (the file's time is the download time). If the app says "Taken … ago", download that photo again.
-- **On a phone:** open the photo on your laptop screen and **take a picture of the screen** with the phone. This is real camera use, so all the checks run as they would on site.
+## Important: progress photos are taken with the app's own camera
+Since v0.10 the app opens its own camera view (no gallery, no file upload), so a laptop cannot take progress photos (it can review and approve). To test with these photos: open a photo on your laptop screen and **point the phone at the screen** in the app's camera, then tap Take photo. All the checks run as they would on site. (Pointing at a screen passing the checks is itself one of the limits: management review is there for that.)
 
 ## Steps
 1. Open **Klang Warehouse** → **Blueprint** tab → **Upload a blueprint** → choose the PDF → pick **Page 1** → name it *Ground floor*.
-2. **Set scale:** tap both ends of the **48 000** dimension line at the top, type **48** (metres; if you type 48000 the app reads it as millimetres).
-3. **Trace** using `tracing-guide.png`: Wall tool, tap corners 1 → 2 → 3 → 4 → 1, then Stop (W1–W4); then W5–W9; Pipe tool for P1–P4; Column tool on the 18 black squares.
+2. **Set scale:** tap both ends of the **48 000** dimension line at the top, type **48** (metres; if you type 48000 the app reads it as millimetres). Then **check the scale**: tap both ends of the **24 000** dimension on the left, type **24**. It should say less than 1% off.
+2b. On a phone, **touch and hold** on the plan to get the magnifier, slide to the exact corner, let go.
+3. **Trace** using `tracing-guide.png` (after the columns, tap **Split long walls into panels**: W1 becomes W1a–W1f at the columns; the photo names below then apply to W1a, W2a…): Wall tool, tap corners 1 → 2 → 3 → 4 → 1, then Stop (W1–W4); then W5–W9; Pipe tool for P1–P4; Column tool on the 18 black squares.
 4. (Optional) **Add floor** → PDF page 2 → *Level 1*, trace its 5 walls. Check the 3D view stacks it on top.
 5. **Progress photo** → choose **Wall 1** → upload `W1-wall-1-blockwork.jpg` → Save. Then `W1-wall-2-plastered.jpg`, then `W1-wall-3-painted.jpg` (the last one goes to management because Wall 1 reaches 100%).
 6. **Try the checks:**

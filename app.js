@@ -572,8 +572,23 @@
     buy: () => role() === "boss" || role() === "buyer"
   };
 
-  // a finished phase counts fully; an unfinished one counts by how far its blueprint parts are built (if any)
-  function progress(p) { return p.phases.length ? p.phases.reduce((t, x, i) => t + (x.done ? 1 : phasePartsPct(p, i) || 0), 0) / p.phases.length : 0; }
+  /* Project progress = share of the contract value done (AC6). Each phase has a value (entered from the
+     BOQ / quotation, or estimated from the contract value until then); a finished phase counts fully, an
+     unfinished one by how far its blueprint parts are built. D = "as of this date" for snapshots. */
+  function phaseValues(p) {
+    const n = p.phases.length; if (!n) return [];
+    if (p.phaseValues && p.phaseValues.length === n) return p.phaseValues;
+    const share = n === PHASE_SHARE.length ? PHASE_SHARE : p.phases.map(() => 100 / n);
+    return share.map((x) => Math.round(((p.value || 0) * x) / 100));
+  }
+  function progressAt(p, D) {
+    const vals = phaseValues(p), tot = vals.reduce((a, b) => a + b, 0);
+    const pc = (x, i) => (x.done && (!D || (x.doneOn || "") <= D) ? 1 : phasePartsPct(p, i, D) || 0);
+    if (!p.phases.length) return 0;
+    if (!tot) return p.phases.reduce((t, x, i) => t + pc(x, i), 0) / p.phases.length;
+    return p.phases.reduce((t, x, i) => t + vals[i] * pc(x, i), 0) / tot;
+  }
+  function progress(p) { return progressAt(p, null); }
   function lateDays(p) { return Math.max(0, diffDays(p.originalEnd || p.end, p.end)); }
   function nextPhase(p) { return p.phases.find((x) => !x.done); }
   function projectStatus(p) {
@@ -848,6 +863,7 @@
   }
   function after() {
     hydratePhotos();
+    try { autoSnapshots(); } catch (e) { /* never block the page */ }
     setTimeout(() => faceSweep().catch(() => {}), 400);
     $$("[data-3d]").forEach((el) => {
       const p = project(el.dataset["3d"]);
@@ -1461,34 +1477,68 @@
   const ptype = (t) => S.settings.partTypes[t] || PART_TYPES_DEFAULT[t];
   const planOf = (p, part) => (p.plans || []).find((x) => x.id === part.planId);
   const counts = (e) => e.status === "ok" || e.status === "approved";
-  function partStage(part) { let s = 0; (part.log || []).forEach((e) => { if (counts(e)) s = e.stage; }); return s; }
+  const alive = (x) => !x.removed;
+  // the day a photo starts counting: an approved photo counts from the day it was approved
+  const countDate = (e) => (e.status === "approved" && e.approvedAt ? e.approvedAt.slice(0, 10) : e.date);
+  function lastCounted(part, D) { let r = null; (part.log || []).forEach((e) => { if (counts(e) && (!D || countDate(e) <= D)) r = e; }); return r; }
+  function partStage(part) { const e = lastCounted(part); return e ? e.stage : 0; }
+  const partPortion = (part) => { const e = lastCounted(part); return e ? e.portion || 1 : 1; };
   const partPending = (part) => (part.log || []).find((e) => e.status === "pending");
   const stageName = (part, i) => (ptype(part.type).stages[i] || ["?"])[0];
   const stagePct = (part, i) => (ptype(part.type).stages[i] || [0, 0])[1];
-  const partPct = (part) => stagePct(part, partStage(part));
+  const PORTIONS = { "¼": 0.25, "½": 0.5, "¾": 0.75, All: 1 };
+  const portionTxt = (q) => (q >= 1 ? "" : q >= 0.75 ? "¾ " : q >= 0.5 ? "½ " : "¼ ");
+  /* A part's value (0–100): the stage below counts fully, the current stage by its portion (AC5).
+     The stage values are the ones saved with the photo, so changing them in Settings later never
+     rewrites past progress (AC8). Photos saved before v0.10 have no saved values: today's are used. */
+  function entryPct(part, e) {
+    if (!e) return 0;
+    const v = e.val != null ? e.val : stagePct(part, e.stage), vp = e.valPrev != null ? e.valPrev : stagePct(part, Math.max(0, e.stage - 1));
+    return vp + (e.portion || 1) * (v - vp);
+  }
+  const partPct = (part) => Math.round(entryPct(part, lastCounted(part)) * 10) / 10;
+  const partPctAt = (part, D) => entryPct(part, lastCounted(part, D));
+  const partState = (part) => portionTxt(partPortion(part)) + stageName(part, partStage(part));
   function partLen(p, part) {
     if (part.type === "column" || !part.b) return 0;
     const pl = planOf(p, part);
     return Math.hypot(part.b[0] - part.a[0], part.b[1] - part.a[1]) * ((pl && pl.scale) || DEFAULT_MPP);
   }
-  const partWeight = (p, part) => (part.type === "column" ? 3 : Math.max(0.5, partLen(p, part)));
-  function partsPct(p, list) {
+  // size of a part within its type (AC6): walls by area (length × floor height), pipes by length, columns each the same
+  function partWeight(p, part) {
+    if (part.type === "column") return 1;
+    const pl = planOf(p, part), L = Math.max(0.5, partLen(p, part));
+    return part.type === "wall" ? L * ((pl && pl.height) || 4) : L;
+  }
+  function partsPct(p, list, D) {
     let w = 0, v = 0;
-    list.forEach((x) => { const k = partWeight(p, x); w += k; v += (k * partPct(x)) / 100; });
+    list.forEach((x) => { const k = partWeight(p, x); w += k; v += (k * (D ? partPctAt(x, D) : entryPct(x, lastCounted(x)))) / 100; });
     return w ? v / w : null;
   }
-  const phaseParts = (p, i) => (p.parts || []).filter((x) => ptype(x.type).phase === i);
-  function phasePartsPct(p, i) { const l = phaseParts(p, i); return l.length ? partsPct(p, l) : null; }
+  const phaseParts = (p, i) => (p.parts || []).filter((x) => alive(x) && ptype(x.type).phase === i);
+  // a phase's built share (0–1); if two part types count towards the same phase, each type is half of it
+  function phasePartsPct(p, i, D) {
+    const l = phaseParts(p, i); if (!l.length) return null;
+    const types = PART_ORDER.filter((t) => l.some((x) => x.type === t));
+    return types.reduce((t, ty) => t + partsPct(p, l.filter((x) => x.type === ty), D), 0) / types.length;
+  }
+  // what one part is worth as a share of the whole contract (0–1), for the "big jump" rule
+  function partShare(p, part) {
+    const vals = phaseValues(p), tot = vals.reduce((a, b) => a + b, 0) || 1, i = ptype(part.type).phase;
+    const l = phaseParts(p, i), types = PART_ORDER.filter((t) => l.some((x) => x.type === t)).length || 1;
+    const same = l.filter((x) => x.type === part.type), tw = same.reduce((a, x) => a + partWeight(p, x), 0) || 1;
+    return ((vals[i] || 0) / tot) * (1 / types) * (partWeight(p, part) / tw);
+  }
   const stageColor = (pct) => (pct <= 0 ? "#AEB8C0" : pct >= 100 ? "#2E8B57" : pct < 60 ? "#D08A2E" : "#2F6F73");
   function nextPartName(p, type) {
     let n = 0;
-    (p.parts || []).forEach((x) => { if (x.type === type) { const m = /(\d+)$/.exec(x.name); if (m) n = Math.max(n, +m[1]); } });
+    (p.parts || []).forEach((x) => { if (x.type === type) { const m = /(\d+)[a-z]?$/.exec(x.name); if (m) n = Math.max(n, +m[1]); } });
     return ptype(type).label + " " + (n + 1);
   }
   const metres = (m) => (m >= 10 ? m.toFixed(0) : m.toFixed(1)) + " m";
   function partSub(p, x) {
     const pl = planOf(p, x);
-    return [(p.plans || []).length > 1 && pl ? pl.name : "", x.type !== "column" ? metres(partLen(p, x)) : "", stageName(x, partStage(x))].filter(Boolean).join(" · ");
+    return [(p.plans || []).length > 1 && pl ? pl.name : "", x.type !== "column" ? metres(partLen(p, x)) : "", x.removed ? "Removed" : partState(x)].filter(Boolean).join(" · ");
   }
   function distM(a, b) {   // metres between two GPS points
     const R = 6371000, t = Math.PI / 180, dLa = (b.lat - a.lat) * t, dLo = (b.lng - a.lng) * t;
@@ -1504,23 +1554,23 @@
     const floors = plans.map((pl) => {
       const k = pl.scale || DEFAULT_MPP, f = { elev, parts: [] };
       elev += pl.height || 4;
-      (p.parts || []).filter((x) => x.planId === pl.id).forEach((x) => {
-        const n = ptype(x.type).stages.length, s = partStage(x);
+      (p.parts || []).filter((x) => x.planId === pl.id && alive(x)).forEach((x) => {
+        const n = ptype(x.type).stages.length, s = Math.max(0, partStage(x) - (partPortion(x) < 0.5 ? 1 : 0));
         const look = s === 0 ? 0 : s >= n - 1 ? 3 : s === 1 ? 1 : 2;
         const b = x.b || x.a;
         f.parts.push({ id: x.id, type: x.type, x1: x.a[0] * k, z1: x.a[1] * k, x2: b[0] * k, z2: b[1] * k, look, h: pl.height || 4, pending: !!partPending(x) });
       });
       return f;
     });
-    const key = plans.map((pl) => pl.id + pl.scale + pl.height).join() + "|" + (p.parts || []).map((x) => x.id + partStage(x) + (partPending(x) ? "w" : "") + x.a + x.b).join("|");
+    const key = plans.map((pl) => pl.id + pl.scale + pl.height).join() + "|" + (p.parts || []).filter(alive).map((x) => x.id + partStage(x) + partPortion(x) + (partPending(x) ? "w" : "") + x.a + x.b).join("|");
     return { plan: { floors }, planKey: String(hashStr(key)) };
   }
-  const hasPlan3D = (p) => !!(p.parts && p.parts.length);
+  const hasPlan3D = (p) => !!(p.parts && p.parts.some(alive));
 
   // blueprint with traced parts drawn on top (SVG in the blueprint's own pixels)
   function planBoard(p, pl, o) {
     o = o || {};
-    const parts = (p.parts || []).filter((x) => x.planId === pl.id);
+    const parts = (p.parts || []).filter((x) => x.planId === pl.id && alive(x));
     const big = Math.max(pl.w, pl.h), sw = big / (o.mini ? 120 : 170), fs = big / (o.mini ? 48 : 70);
     const label = (x, cx, cy) => '<text class="pl-lbl" x="' + cx.toFixed(1) + '" y="' + cy.toFixed(1) + '" font-size="' + fs.toFixed(1) + '" stroke-width="' + (fs / 4).toFixed(1) + '">' + esc(x.type === "column" ? x.name.replace(/^Column /, "") : x.name.replace(/^(Wall|Pipe) /, (m, t) => t[0])) + "</text>";
     const items = parts.map((x) => {
@@ -1558,7 +1608,7 @@
   function typeBars(p, list) {
     return PART_ORDER.map((t) => {
       const l = list.filter((x) => x.type === t); if (!l.length) return "";
-      const pct = partsPct(p, l), done = l.filter((x) => partPct(x) >= 100).length;
+      const pct = partsPct(p, l), done = l.filter((x) => partPct(x) >= 100).length;   // by area (walls), length (pipes), count (columns)
       return '<div class="bp-type"><div class="row-between"><b>' + ptype(t).plural + '</b><span class="num">' + Math.round(pct * 100) + "%</span></div>" + pbar(pct, "teal") + '<div class="small muted">' + done + " of " + l.length + " done</div></div>";
     }).join("");
   }
@@ -1567,17 +1617,17 @@
     (p.parts || []).forEach((x) => (x.log || []).forEach((e) => { if (e.status === "pending") rows.push([x, e]); }));
     if (!rows.length) return "";
     return '<div class="card bp-pending"><h2 class="card-title">' + plural(rows.length, "photo") + " waiting for management</h2>" + rows.map(([x, e]) =>
-      '<div class="li">' + img(e.photo, "thumb-sm", x.name) + '<div class="li-main"><div class="li-title">' + esc(x.name) + " → " + esc(stageName(x, e.stage)) + " (" + stagePct(x, e.stage) + '%)</div><div class="li-sub">' + esc(e.by) + ", " + fmtDay(e.date) + " " + esc(e.time) + "</div>" +
+      '<div class="li">' + img(e.photo, "thumb-sm", x.name) + '<div class="li-main"><div class="li-title">' + esc(x.name) + " → " + esc(portionTxt(e.portion || 1) + stageName(x, e.stage)) + " (" + Math.round(entryPct(x, e)) + '%)</div><div class="li-sub">' + esc(e.by) + ", " + fmtDay(e.date) + " " + esc(e.time) + "</div>" +
       (e.flags || []).map((f) => '<div class="bp-flag">' + icon("alert") + "<span>" + esc(f) + "</span></div>").join("") + "</div>" +
-      (can.manage() ? '<div class="bp-acts"><button class="btn btn-sm btn-primary" data-action="prog-approve" data-pid="' + p.id + '" data-part="' + x.id + '" data-e="' + e.id + '">Approve</button><button class="btn btn-sm btn-soft" data-action="prog-reject" data-pid="' + p.id + '" data-part="' + x.id + '" data-e="' + e.id + '">Send back</button></div>' : chip("Waiting", "warn")) + "</div>").join("") + "</div>";
+      (can.manage() ? '<div class="bp-acts"><button class="btn btn-sm btn-primary" data-action="prog-review" data-pid="' + p.id + '" data-part="' + x.id + '" data-e="' + e.id + '">Review</button></div>' : chip("Waiting", "warn")) + "</div>").join("") + "</div>";
   }
   // summary inside the project's Blueprint tab
   function blueprintSummary(p) {
-    const parts = p.parts || [];
+    const parts = (p.parts || []).filter(alive);
     const open = '<button class="btn btn-primary mt-12" data-action="plan-open" data-id="' + p.id + '">' + icon("image") + (p.plans && p.plans.length ? "Open blueprint" : "Upload a blueprint") + "</button>";
     if (!parts.length) return '<p class="muted">' + (p.plans && p.plans.length ? "Trace the walls, pipes and columns on the blueprint to start tracking them." : "Upload the blueprint (PDF or picture), trace the walls, pipes and columns, then the site manager photographs each part as it progresses.") + "</p>" + open;
     const pend = parts.filter((x) => partPending(x)).length;
-    return '<div class="bp-total"><span class="num">' + Math.round(partsPct(p, parts) * 100) + '%</span><span class="muted small">built, weighted by size, from ' + plural(parts.length, "part") + "</span></div>" +
+    return '<div class="bp-total"><span class="num">' + Math.round(progress(p) * 100) + '%</span><span class="muted small">of the contract value done' + (can.seeMoney() ? ": " + RM(Math.round(progress(p) * phaseValues(p).reduce((a, b) => a + b, 0))) : "") + "</span></div>" +
       '<div class="bp-types">' + typeBars(p, parts) + "</div>" + (pend ? '<div class="report mt-12">' + icon("alert") + "<div>" + plural(pend, "photo") + " waiting for management approval.</div></div>" : "") + open;
   }
 
@@ -1592,7 +1642,7 @@
     const mode = ui.planMode[id] || "progress";
     const edit = can.tick();
     const head = '<a class="back" href="#/project/' + p.id + '">' + icon("left") + esc(p.name) + "</a>" +
-      '<div class="page-head"><div><h1 class="page-title">Blueprint' + helpBtn("Upload the blueprint of each floor and trace its walls, pipes and columns once. The site manager then photographs a part and picks it from the list; the app checks the photo can be trusted (taken just now with the camera, at the site, sharp, bright enough, not used before) and that the stage goes up one step at a time. Big jumps and photos that do not look right wait for management. Progress is weighted by size and feeds the work phases and the 3D model.") + '</h1><p class="page-sub">' + esc(p.name) + "</p></div>" +
+      '<div class="page-head"><div><h1 class="page-title">Blueprint' + helpBtn("Upload the blueprint of each floor, set and check the scale, and trace its walls, pipes and columns once (long walls can be split into panels). The site manager picks a part and takes the photo with the app's own camera; the app checks it can be trusted (inside the site boundary, sharp, bright enough, not used before, same place as the part's last photo) and that the stage goes up one step at a time, with ¼ ½ ¾ for part-done work. Big jumps and doubtful photos wait for management, who approve them side by side with the last photo. Progress is the share of the contract value done, and is locked into a record at each month end.") + '</h1><p class="page-sub">' + esc(p.name) + "</p></div>" +
       (edit && p.parts.length ? '<button class="btn btn-primary" data-action="open-progress" data-id="' + p.id + '">' + icon("camera") + "Progress photo</button>" : "") + "</div>";
     if (!pl) return head + '<div class="card bp-empty">' + icon("image") + "<h2>No blueprint yet</h2><p class=\"muted\">Upload a PDF or a picture of the floor plan. You can add more floors later.</p>" +
       (edit ? '<button class="btn btn-primary" data-action="plan-upload" data-id="' + p.id + '">' + icon("plus") + "Upload blueprint</button>" : '<p class="muted small">Management or the site manager can upload it.</p>') + "</div>";
@@ -1609,33 +1659,43 @@
       const tool = ui.planTool || "wall";
       const tb = (k, l) => '<button class="fchip ' + (tool === k ? "on" : "") + '" data-action="plan-tool" data-t="' + k + '">' + l + "</button>";
       const hint = tool === "scale" ? "Tap both ends of a line whose real length you know (for example a dimension on the plan)." :
+        tool === "scalecheck" ? "Check the scale: tap both ends of a different dimension (for example the 24 000 one)." :
         tool === "column" ? "Tap each column." :
         ui.planStart ? "Tap the next corner to continue the " + ptype(tool).label.toLowerCase() + ", or Stop." : "Tap where the " + ptype(tool).label.toLowerCase() + " starts, then where it ends. Lines snap straight and to nearby ends.";
-      body = '<div class="card bp-tools"><div class="row-between wrap" style="gap:8px"><div class="chips">' + tb("wall", "Wall") + tb("pipe", "Pipe") + tb("column", "Column") + tb("scale", "Set scale") + "</div>" + zoomBtns + "</div>" +
+      body = '<div class="card bp-tools"><div class="row-between wrap" style="gap:8px"><div class="chips">' + tb("wall", "Wall") + tb("pipe", "Pipe") + tb("column", "Column") + tb("scale", "Set scale") + (pl.scale ? tb("scalecheck", "Check scale") : "") + "</div>" + zoomBtns + "</div>" +
         '<p class="small bp-hint">' + icon(tool === "scale" ? "sliders" : "edit") + "<span>" + hint + "</span></p>" +
-        '<div class="row wrap" style="gap:8px">' + (ui.planStart ? '<button class="btn btn-sm btn-soft" data-action="plan-stop">Stop</button>' : "") + (floorParts.length ? '<button class="btn btn-sm btn-soft" data-action="plan-undo" data-pid="' + p.id + '">' + icon("undo") + "Undo last part</button>" : "") +
-        '<span class="small ' + (pl.scale ? "muted" : "warn-text") + '">' + (pl.scale ? "Scale set: 1 m = " + (1 / pl.scale).toFixed(1) + " px" : "Scale not set yet: lengths are estimates. Use Set scale.") + "</span></div></div>" +
+        // the toolbar keeps the same size between taps, so the plan never moves under the finger
+        '<div class="row wrap" style="gap:8px"><button class="btn btn-sm btn-soft" data-action="plan-stop"' + (ui.planStart ? "" : " disabled") + '>Stop</button>' + '<button class="btn btn-sm btn-soft" data-action="plan-undo" data-pid="' + p.id + '"' + (floorParts.length ? "" : " disabled") + ">" + icon("undo") + "Undo last part</button>" +
+        '<span class="small ' + (pl.scale ? "muted" : "warn-text") + '">' + (pl.scale ? "Scale set: 1 m = " + (1 / pl.scale).toFixed(1) + " px" : "Scale not set yet: lengths are estimates. Use Set scale.") + "</span></div>" +
+        (pl.scale && pl.scaleCheck ? '<p class="small ' + (Math.abs(pl.scaleCheck.diff) > 1 ? "warn-text" : "muted") + '">' + icon(Math.abs(pl.scaleCheck.diff) > 1 ? "alert" : "check", ' style="width:14px;height:14px;vertical-align:-2px"') + " Scale check: " + pl.scaleCheck.measured.toFixed(2) + " m measured, " + pl.scaleCheck.real + " m on the drawing (" + (pl.scaleCheck.diff > 0 ? "+" : "") + pl.scaleCheck.diff.toFixed(1) + "%)" + (Math.abs(pl.scaleCheck.diff) > 1 ? ". More than 1% off: the plan may be skewed (a photo of paper?) or not to scale. Use a PDF export if you can." : ".") + "</p>" :
+          pl.scale ? '<p class="small warn-text">Scale not checked yet: use Check scale on a second dimension.</p>' : "") +
+        ("ontouchstart" in window ? '<p class="small muted">Tip: touch and hold on the plan to see a magnifier, then let go on the exact point.</p>' : "") + "</div>" +
         planBoard(p, pl, { tap: "plan-tap", start: ui.planStart }) +
+        (() => { const iss = traceIssues(p, pl); return floorParts.length ? '<div class="card mt-16"><div class="card-head"><h2 class="card-title">Tracing check</h2>' + (floorParts.some((x) => x.type === "wall" && alive(x) && !x.group && x.b && partLen(p, x) > 10) ? '<button class="btn btn-sm btn-soft" data-action="plan-split" data-pid="' + p.id + '">Split long walls into panels</button>' : "") + "</div>" +
+          (iss.length ? iss.map((t) => '<div class="bp-flag">' + icon("alert") + "<span>" + esc(t) + "</span></div>").join("") : '<p class="small" style="color:#2E7D4F">' + icon("check", ' style="width:14px;height:14px;vertical-align:-2px"') + " No doubles, gaps or tiny walls found.</p>") +
+          '<h3 class="bp-h3">Totals on ' + esc(pl.name) + '</h3><div class="list">' + traceTotals(p, pl) + '</div><p class="small muted">Compare these with the drawing or the BOQ.</p></div>' : ""; })() +
         '<div class="card mt-16"><h2 class="card-title">Parts on ' + esc(pl.name) + " (" + floorParts.length + ")</h2>" + (floorParts.length ? partList(p, floorParts) : empty("Nothing traced yet.")) + "</div>" +
         '<div class="card mt-16"><h2 class="card-title">Floor settings</h2><div class="grid-2"><label class="field"><span>Floor name</span><input class="input" data-change="plan-meta" data-k="name" data-pid="' + p.id + '" data-id="' + pl.id + '" value="' + esc(pl.name) + '"></label>' +
         '<label class="field"><span>Floor height (m), for the 3D model</span><input class="input" type="number" step="0.5" min="2" data-change="plan-meta" data-k="height" data-pid="' + p.id + '" data-id="' + pl.id + '" value="' + (pl.height || 4) + '"></label></div>' +
         '<button class="btn btn-sm btn-danger" data-action="plan-del" data-pid="' + p.id + '" data-id="' + pl.id + '">' + icon("trash") + "Remove this floor</button></div>";
     } else {
-      const geo = p.geo ? '<p class="small muted">' + icon("pin", ' style="width:14px;height:14px;vertical-align:-2px"') + " Site location set " + fmtDay(p.geo.at.slice(0, 10)) + " (±" + Math.round(p.geo.acc) + " m). Photos are checked against it." + (edit ? ' <button class="link-btn small" data-action="plan-geo" data-id="' + p.id + '">Set again</button>' : "") + "</p>" :
-        edit ? '<div class="report">' + icon("pin") + '<div><b>Site location not set.</b> Stand at the site and tap the button, so photos can be checked against it.</div><button class="btn btn-sm" data-action="plan-geo" data-id="' + p.id + '">Set site location here</button></div>' : "";
-      body = (p.parts.length ? '<div class="card"><div class="bp-total"><span class="num">' + Math.round(partsPct(p, p.parts) * 100) + '%</span><span class="muted small">built, weighted by size</span></div><div class="bp-types">' + typeBars(p, p.parts) + "</div></div>" : "") +
+      const geo = p.geo ? '<p class="small muted">' + icon("pin", ' style="width:14px;height:14px;vertical-align:-2px"') + " Site boundary set on the map (" + (p.geo.r || 150) + " m around the pin). Photos are checked against it." + (can.manage() ? ' <button class="link-btn small" data-action="plan-geo" data-id="' + p.id + '">Change</button>' : "") + "</p>" :
+        edit ? '<div class="report">' + icon("pin") + '<div><b>Site boundary not set.</b> Put the site on the map, so photos can be checked against it.</div>' + (can.manage() ? '<button class="btn btn-sm" data-action="plan-geo" data-id="' + p.id + '">Set on map</button>' : "") + "</div>" : "";
+      const live = p.parts.filter(alive);
+      body = valueCard(p) + (live.length ? '<div class="card mt-16"><h2 class="card-title">Built so far</h2><div class="bp-types">' + typeBars(p, live) + '</div><p class="small muted mt-8">Walls by area, pipes by length, columns by count. A part-done stage counts by its portion (¼ ½ ¾).</p></div>' : "") +
         pendingList(p) + geo +
         (floorParts.length || edit ? '<div class="row-between wrap mt-16" style="gap:8px">' + planLegend() + zoomBtns + "</div>" + planBoard(p, pl, { pick: "part-open" }) : "") +
         (p.parts.length ? "" : '<div class="card mt-16">' + empty("No parts traced yet.", edit ? '<br><button class="btn btn-primary" data-action="plan-mode" data-pid="' + p.id + '" data-m="parts">Trace parts</button>' : "") + "</div>") +
-        (floorParts.length ? PART_ORDER.map((t) => { const l = floorParts.filter((x) => x.type === t); return l.length ? fold("bp-" + p.id + "-" + t, ptype(t).plural + " · " + Math.round(partsPct(p, l) * 100) + "%", l.filter((x) => partPct(x) >= 100).length + " of " + l.length + " done", "", partList(p, l)) : ""; }).join("") : "");
+        (floorParts.length ? PART_ORDER.map((t) => { const l = floorParts.filter((x) => x.type === t && alive(x)); return l.length ? fold("bp-" + p.id + "-" + t, ptype(t).plural + " · " + Math.round(partsPct(p, l) * 100) + "%", l.filter((x) => partPct(x) >= 100).length + " of " + l.length + " done", "", partList(p, l)) : ""; }).join("") : "") +
+        (p.parts.some(alive) ? snapsCard(p) : "");
     }
     return head + floors + seg + body;
   }
   function partList(p, list) {
     return '<div class="list">' + list.map((x) => {
       const pct = partPct(x), last = (x.log || []).filter(counts).slice(-1)[0], pend = partPending(x);
-      return '<button class="li li-btn" data-action="part-open" data-id="' + x.id + '"><span class="bp-sw" style="background:' + stageColor(pct) + '"></span><span class="li-main"><span class="li-title">' + esc(x.name) + '</span><span class="li-sub">' + esc(partSub(p, x)) + (last ? " · photo " + fmtDay(last.date) : "") + "</span></span>" +
-        (pend ? chip("Waiting", "warn") : "") + '<span class="num small">' + pct + "%</span></button>";
+      return '<button class="li li-btn' + (x.removed ? " removed" : "") + '" data-action="part-open" data-id="' + x.id + '"><span class="bp-sw" style="background:' + (x.removed ? "#DDE2E6" : stageColor(pct)) + '"></span><span class="li-main"><span class="li-title">' + esc(x.name) + '</span><span class="li-sub">' + esc(partSub(p, x)) + (last ? " · photo " + fmtDay(last.date) : "") + "</span></span>" +
+        (x.removed ? chip("Removed", "") : pend ? chip("Waiting", "warn") : "") + '<span class="num small">' + Math.round(pct) + "%</span></button>";
     }).join("") + "</div>";
   }
 
@@ -1675,19 +1735,26 @@
     return c.toDataURL("image/jpeg", 0.85);
   }
 
+  // what the photo will record, from the choice in the sheet: { stage, portion, val, valPrev, pct, from }
+  function progTarget(part, s) {
+    const cur = partStage(part), f = (ui.sheet && ui.sheet.f) || {};
+    const portion = s.dir === "back" ? 1 : PORTIONS[f.portion || "All"] || 1;
+    const stage = s.dir === "back" ? cur - 1 : s.dir === "more" ? cur : cur + 1;
+    const e = { stage, portion, val: stagePct(part, stage), valPrev: stagePct(part, Math.max(0, stage - 1)) };
+    return Object.assign(e, { pct: entryPct(part, e), from: entryPct(part, lastCounted(part)) });
+  }
+
   // all checks for a progress photo; hard ones block saving, soft ones send it to management
   function progressChecks(p, part, s) {
     const out = [], sh = s.shot; if (!sh) return out;
-    const m = sh.metrics || {};
-    const cur = partStage(part), tgt = s.dir === "back" ? cur - 1 : cur + 1;
-    const age = Date.now() - (sh.exif || sh.taken);
-    out.push(age > FRESH_MIN * 60000 ? { level: "hard", text: "Taken " + ago(age) + " ago. Take a new photo with the camera, now." } : { level: "ok", text: "Taken just now with the camera" });
-    if (m.lum < 40) out.push({ level: "hard", text: "Too dark. Turn on a light or use the flash, and retake." });
+    const m = sh.metrics || {}, tg = progTarget(part, s);
+    if (sh.inApp) out.push({ level: "ok", text: "Taken just now with the app's camera" });
+    else { const age = Date.now() - (sh.exif || sh.taken); out.push(age > FRESH_MIN * 60000 ? { level: "hard", text: "Taken " + ago(age) + " ago. Take a new photo with the camera, now." } : { level: "ok", text: "Taken just now" }); }
+    if (m.lum < 40) out.push({ level: "hard", text: "Too dark. Turn on a light, and retake." });
     else if (m.lum > 245) out.push({ level: "hard", text: "Too bright (washed out). Retake out of direct sun." });
     else out.push({ level: "ok", text: "Bright enough" });
     out.push(m.sharp < 50 ? { level: "hard", text: "Too blurry. Hold the phone still and retake." } : { level: "ok", text: "Sharp" });
-    // reuse: near-identical to a photo of ANOTHER part = blocked (a photo passed off as a different wall);
-    // near-identical to this part's own last photo = management checks (the work may not have moved on)
+    // reuse: near-identical to a photo of ANOTHER part = blocked; to this part's own last photo = management checks
     const same = (e) => e.hash && window.PhotoCheck.hamming(e.hash, m.hash) <= 6 && (!e.hash2 || !m.hash2 || window.PhotoCheck.hamming(e.hash2, m.hash2) <= 24);
     let reuse = null;
     S.projects.forEach((pp) => (pp.parts || []).forEach((x) => { if (x !== part) (x.log || []).forEach((e) => { if (!reuse && same(e)) reuse = [x, e]; }); }));
@@ -1695,32 +1762,213 @@
     if (reuse) out.push({ level: "hard", text: "Same photo as " + reuse[0].name + " on " + fmtDay(reuse[1].date) + ". Take a new one of " + part.name + "." });
     else if (own && same(own)) out.push({ level: "soft", text: "Looks almost the same as the last photo of " + part.name + " (" + fmtDay(own.date) + "). Has the work moved on?" });
     else out.push({ level: "ok", text: "Not a photo used before" });
-    // location
-    if (!p.geo) out.push({ level: "info", text: "Site location not set yet, so the place cannot be checked." });
+    // AC2: is it the same place as this part's last photo? (layout fingerprint; a soft hint, not proof)
+    const lastE = lastCounted(part);
+    if (lastE && (lastE.hash2 || (lastE.metrics && lastE.metrics.layout)) && !(own && same(own))) {
+      // different place if the colour layout (30+) or the fingerprint (100+ of 256) clearly differs; tuned so photos of
+      // the same spot at different stages pass. Two similar walls in the same building cannot be told apart this way.
+      const lay = lastE.metrics && lastE.metrics.layout ? window.PhotoCheck.layoutDist(lastE.metrics.layout, m.layout) : 0;
+      out.push(lay > 30 || (lastE.hash2 && m.hash2 && window.PhotoCheck.hamming(lastE.hash2, m.hash2) > 100)
+        ? { level: "soft", text: "Looks like a different place from the last photo of " + part.name + " (" + fmtDay(lastE.date) + "). Check it is the right " + ptype(part.type).label.toLowerCase() + "." }
+        : { level: "ok", text: "Same place as the last photo of " + part.name });
+    }
+    // AC4: inside the site boundary, with good enough GPS
+    if (!p.geo) out.push({ level: "info", text: "Site boundary not set on the map yet, so the place cannot be checked." });
     else if (s.geo) {
-      const dd = distM(p.geo, s.geo), lim = (S.settings.geofenceM || 200) + Math.min(100, s.geo.acc || 0);
-      out.push(dd > lim ? { level: "soft", text: "Taken " + (dd >= 1000 ? (dd / 1000).toFixed(1) + " km" : Math.round(dd) + " m") + " from the site." } : { level: "ok", text: "At the site (" + Math.round(dd) + " m away)" });
+      const acc = s.geo.acc || 0, dd = distM(p.geo, s.geo), r = p.geo.r || S.settings.geofenceM || 150;
+      if (acc > 50) out.push({ level: "soft", text: "GPS not accurate enough (±" + Math.round(acc) + " m) to confirm the place." });
+      else if (dd > r + acc) out.push({ level: "soft", text: "Taken " + (dd >= 1000 ? (dd / 1000).toFixed(1) + " km" : Math.round(dd) + " m") + " from the site centre, outside the site boundary (" + r + " m)." });
+      else out.push({ level: "ok", text: "Inside the site boundary (GPS ±" + Math.round(acc) + " m)" });
     } else out.push({ level: "soft", text: s.geoErr ? "Location not available (" + s.geoErr + ")." : "Finding your location…", wait: !s.geoErr });
-    // colour rules (walls): plaster and paint make a wall lighter and smoother than bare blocks
-    if (part.type === "wall" && s.dir !== "back" && tgt >= 2) {
+    // AC10: colour hint for walls (middle of the photo vs the middle of the last photo); never blocks
+    if (part.type === "wall" && s.dir !== "back" && tg.stage >= 2) {
       const prev = (part.log || []).filter((e) => counts(e) && e.metrics).slice(-1)[0];
       const n = ptype("wall").stages.length;
-      if (prev && m.lc < prev.metrics.lc - 30) out.push({ level: "soft", text: "Looks darker than the last photo of this wall. Plaster and paint usually make it lighter." });
-      else if (tgt >= n - 1 && m.lc < 110 && m.sat < 0.12) out.push({ level: "soft", text: "Looks grey like bare blockwork or cement, not paint." });
+      if (prev && m.lc < prev.metrics.lc - 30) out.push({ level: "soft", text: "The middle of the wall looks darker than in the last photo. Plaster and paint usually make it lighter." });
+      else if (tg.stage >= n - 1 && m.lc < 110 && m.sat < 0.12) out.push({ level: "soft", text: "Looks grey like bare blockwork or cement, not paint." });
       else out.push({ level: "ok", text: "Colour fits the stage" });
     }
-    // big jumps wait for management
+    // big jumps wait for management (measured in contract value)
     if (s.dir !== "back") {
-      if (stagePct(part, tgt) >= 100) out.push({ level: "soft", text: part.name + " would be complete (100%). Management approves this." });
+      if (tg.pct >= 100 && tg.from < 100) out.push({ level: "soft", text: part.name + " would be complete (100%). Management approves this." });
       else {
-        const all = p.parts || [], tw = all.reduce((t, x) => t + partWeight(p, x), 0) || 1, t0 = today();
-        let delta = (partWeight(p, part) * (stagePct(part, tgt) - stagePct(part, cur))) / tw;
-        // today's steps not yet seen by management (approved and rejected ones no longer count)
-        all.forEach((x) => (x.log || []).forEach((e) => { if (e.date === t0 && e.status !== "rejected" && e.status !== "approved") delta += (partWeight(p, x) * (stagePct(x, e.stage) - stagePct(x, e.prevStage || 0))) / tw; }));
-        if (delta > (S.settings.bigJumpPct || 10)) out.push({ level: "soft", text: "More than " + (S.settings.bigJumpPct || 10) + "% of the project in one day. Management approves this." });
+        const t0 = today();
+        let delta = partShare(p, part) * (tg.pct - tg.from);
+        (p.parts || []).forEach((x) => (x.log || []).forEach((e) => { if (e.date === t0 && e.status !== "rejected" && e.status !== "approved") delta += partShare(p, x) * (entryPct(x, e) - (e.prevPct != null ? e.prevPct : stagePct(x, e.prevStage || 0))); }));
+        if (delta > (S.settings.bigJumpPct || 10)) out.push({ level: "soft", text: "More than " + (S.settings.bigJumpPct || 10) + "% of the contract value in one day. Management approves this." });
       }
     }
     return out;
+  }
+
+  /* AC3: the app's own camera (no gallery or file picker). The photo is stamped with part, place, time and GPS. */
+  function stopCamera() { if (ui.camStream) { ui.camStream.getTracks().forEach((t) => t.stop()); ui.camStream = null; } }
+  async function startCamera(s) {
+    s.camErr = null;
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { s.camErr = "This device has no camera the app can use. Progress photos are taken with a phone; on a laptop you can review and approve them."; renderSheet(); return; }
+    s.cam = "starting"; renderSheet();
+    try {
+      const st = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1440 } }, audio: false });
+      if (ui.sheet !== s) { st.getTracks().forEach((t) => t.stop()); return; }
+      ui.camStream = st; s.cam = "live"; renderSheet();
+    } catch (e) {
+      s.cam = null;
+      const n = e && e.name;
+      s.camErr = n === "NotAllowedError" ? "Camera permission was refused. Allow the camera for this site in the browser settings, then tap Take photo again." :
+        n === "NotFoundError" || n === "OverconstrainedError" ? "No camera found on this device. Progress photos are taken with a phone; on a laptop you can review and approve them." :
+        "The camera could not start (" + esc(String((e && e.message) || e)) + ").";
+      renderSheet();
+    }
+  }
+  function camAttach() {
+    const v = document.getElementById("camVideo");
+    if (v && ui.camStream && v.srcObject !== ui.camStream) { v.srcObject = ui.camStream; const pr = v.play(); if (pr && pr.catch) pr.catch(() => {}); }
+  }
+  function stampPhoto(c, lines) {
+    const g = c.getContext("2d"), fs = Math.max(14, Math.round(c.width / 44)), pad = Math.round(fs * 0.6), h = lines.length * fs * 1.3 + pad * 2;
+    g.fillStyle = "rgba(0,0,0,.55)"; g.fillRect(0, c.height - h, c.width, h);
+    g.fillStyle = "#fff"; g.font = "600 " + fs + "px Arial, sans-serif";
+    lines.forEach((t, i) => g.fillText(t, pad, c.height - h + pad + fs * (i + 0.95) * 1.3 - fs * 0.25));
+  }
+
+  /* AC7: tracing checks */
+  function segDist(px, py, ax, ay, bx, by) {
+    const dx = bx - ax, dy = by - ay, L2 = dx * dx + dy * dy || 1, t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / L2));
+    return Math.hypot(px - ax - t * dx, py - ay - t * dy);
+  }
+  function traceIssues(p, pl) {
+    const k = pl.scale || DEFAULT_MPP, out = [];
+    const L = (p.parts || []).filter((x) => x.planId === pl.id && alive(x) && x.b);
+    const len = (x) => Math.hypot(x.b[0] - x.a[0], x.b[1] - x.a[1]) * k;
+    L.forEach((x) => { if (len(x) < 0.5) out.push(x.name + " is only " + len(x).toFixed(2) + " m long. Tapped twice by mistake?"); });
+    const gaps = new Set();
+    for (let i = 0; i < L.length; i++) for (let j = i + 1; j < L.length; j++) {
+      const x = L[i], y = L[j]; if (x.type !== y.type) continue;
+      const ax = Math.atan2(x.b[1] - x.a[1], x.b[0] - x.a[0]), ay = Math.atan2(y.b[1] - y.a[1], y.b[0] - y.a[0]);
+      let da = Math.abs(ax - ay) % Math.PI; da = Math.min(da, Math.PI - da);
+      if (da < 0.05) {   // parallel: overlapping if y lies on x's line and they share length
+        const off = segDist(y.a[0], y.a[1], x.a[0], x.a[1], x.b[0], x.b[1]) * k, off2 = segDist(y.b[0], y.b[1], x.a[0], x.a[1], x.b[0], x.b[1]) * k;
+        const ux = Math.cos(ax), uy = Math.sin(ax), lx = Math.hypot(x.b[0] - x.a[0], x.b[1] - x.a[1]);
+        const t1 = (y.a[0] - x.a[0]) * ux + (y.a[1] - x.a[1]) * uy, t2 = (y.b[0] - x.a[0]) * ux + (y.b[1] - x.a[1]) * uy;
+        const ov = (Math.min(lx, Math.max(t1, t2)) - Math.max(0, Math.min(t1, t2))) * k;
+        if ((off < 0.3 || off2 < 0.3) && ov > 0.5) out.push(y.name + " overlaps " + x.name + " by " + ov.toFixed(1) + " m. Traced twice?");
+      }
+      [x.a, x.b].forEach((e) => [y.a, y.b].forEach((f) => { const d = Math.hypot(e[0] - f[0], e[1] - f[1]) * k; if (d > 0.02 && d < 0.5) gaps.add("Gap of " + d.toFixed(2) + " m between the ends of " + x.name + " and " + y.name + "."); }));
+    }
+    gaps.forEach((g) => out.push(g));
+    L.forEach((x) => { if (x.type === "wall" && !x.group && len(x) > 12) out.push(x.name + " is " + Math.round(len(x)) + " m long: split it into panels so part-done work can be recorded."); });
+    return out;
+  }
+  function traceTotals(p, pl) {
+    const k = pl.scale || DEFAULT_MPP, L = (p.parts || []).filter((x) => x.planId === pl.id && alive(x));
+    return PART_ORDER.map((t) => {
+      const l = L.filter((x) => x.type === t); if (!l.length) return "";
+      const m = l.reduce((a, x) => a + (x.b ? Math.hypot(x.b[0] - x.a[0], x.b[1] - x.a[1]) * k : 0), 0);
+      return '<div class="li"><div class="li-main"><b>' + ptype(t).plural + "</b> " + l.length + "</div>" + (t === "column" ? "" : '<span class="num">' + m.toFixed(1) + " m" + (t === "wall" ? " · " + Math.round(m * (pl.height || 4)) + " m²" : "") + "</span>") + "</div>";
+    }).join("");
+  }
+  /* AC4: the site on a map (Leaflet + OpenStreetMap), loaded only when the map is opened */
+  let leafletReady = null;
+  function loadLeaflet() {
+    if (window.L) return Promise.resolve();
+    if (!leafletReady) leafletReady = new Promise((res, rej) => {
+      const css = document.createElement("link"); css.rel = "stylesheet"; css.href = "leaflet.css"; document.head.appendChild(css);
+      const sc = document.createElement("script"); sc.src = "leaflet.js"; sc.onload = res; sc.onerror = rej; document.head.appendChild(sc);
+    });
+    leafletReady.catch(() => { leafletReady = null; });
+    return leafletReady;
+  }
+  function mapInit(s) {
+    const el = document.getElementById("siteMap"); if (!el || el._leaflet_id) return;
+    loadLeaflet().then(() => {
+      if (!document.body.contains(el) || el._leaflet_id) return;
+      const L = window.L, has = s.lat != null, c = has ? [s.lat, s.lng] : [3.0738, 101.5183];
+      const map = L.map(el).setView(c, has ? 17 : 12);
+      L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OpenStreetMap contributors" }).addTo(map);
+      const pin = L.circleMarker(c, { radius: 8, color: "#fff", weight: 3, fillColor: "#2F6F73", fillOpacity: 1 });
+      const ring = L.circle(c, { radius: s.r, color: "#2F6F73", weight: 2, fillOpacity: 0.12 });
+      if (has) { pin.addTo(map); ring.addTo(map); }
+      s.mapMove = (recenter) => { const ll = [s.lat, s.lng]; pin.setLatLng(ll).addTo(map); ring.setLatLng(ll).setRadius(s.r).addTo(map); if (recenter) map.setView(ll, 17); };
+      map.on("click", (ev) => { s.lat = ev.latlng.lat; s.lng = ev.latlng.lng; s.mapMove(false); });
+      const rIn = document.getElementById("rInput"), rVal = document.getElementById("rVal");
+      if (rIn) rIn.addEventListener("input", () => { s.r = +rIn.value; rVal.textContent = s.r + " m"; ring.setRadius(s.r); });
+      setTimeout(() => map.invalidateSize(), 250);
+    }).catch(() => { s.mapErr = "The map could not load (no internet?). Tap Use my location while standing on the site instead."; renderSheet(); });
+  }
+
+  /* AC7: magnifier while tracing on a phone: touch and hold, slide to the exact point, let go to place it */
+  (function () {
+    let hold = 0, active = false, loupe = null, cur = null, eat = false;
+    document.addEventListener("click", (e) => { if (eat) { eat = false; e.stopPropagation(); e.preventDefault(); } }, true);
+    function draw(first) {
+      if (!loupe) { loupe = document.createElement("div"); loupe.id = "loupe"; loupe.hidden = true; document.body.appendChild(loupe); }
+      const im = cur.svg.parentNode.querySelector(".plan-img"); if (!im) return;
+      const r = cur.svg.getBoundingClientRect(), Z = 3, SZ = 120, fx = cur.x - r.left, fy = cur.y - r.top;
+      if (first) { loupe.style.backgroundImage = 'url("' + im.src + '")'; loupe.style.backgroundSize = r.width * Z + "px " + r.height * Z + "px"; }
+      loupe.hidden = false;
+      loupe.style.left = cur.x - SZ / 2 + "px"; loupe.style.top = Math.max(4, cur.y - SZ - 50) + "px";
+      loupe.style.backgroundPosition = -(fx * Z - SZ / 2) + "px " + -(fy * Z - SZ / 2) + "px";
+    }
+    document.addEventListener("pointerdown", (e) => {
+      ui.lastPointerType = e.pointerType;
+      const svg = e.target.closest && e.target.closest(".plan-board.tracing .plan-svg");
+      if (!svg || e.pointerType !== "touch") return;
+      cur = { svg, x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY };
+      clearTimeout(hold); hold = setTimeout(() => { if (cur) { active = true; draw(true); } }, 280);
+    }, true);
+    document.addEventListener("pointermove", (e) => {
+      if (!cur) return;
+      if (!active) { if (Math.hypot(e.clientX - cur.x0, e.clientY - cur.y0) > 8) { clearTimeout(hold); cur = null; } return; }
+      cur.x = e.clientX; cur.y = e.clientY; draw(false);
+    }, true);
+    document.addEventListener("touchmove", (e) => { if (active) e.preventDefault(); }, { passive: false });
+    const end = (cancel) => {
+      clearTimeout(hold);
+      if (active && cur && !cancel) {
+        A["plan-tap"](cur.svg, { clientX: cur.x, clientY: cur.y, fromLoupe: true });
+        eat = true; setTimeout(() => { eat = false; }, 400);   // swallow only the one click the phone may send after letting go
+      }
+      active = false; cur = null; if (loupe) loupe.hidden = true;
+    };
+    document.addEventListener("pointerup", () => end(false), true);
+    document.addEventListener("pointercancel", () => end(!active), true);
+  })();
+
+  /* AC8: month-end snapshots that never change (for claims) */
+  function monthEnd(ym) { const [y, m] = ym.split("-").map(Number); return toISO(new Date(y, m, 0)); }
+  function makeSnap(p, D) {
+    const vals = phaseValues(p), tot = vals.reduce((a, b) => a + b, 0), pct = progressAt(p, D);
+    return { id: uid("sn"), asOf: D, at: new Date().toISOString(), pct: Math.round(pct * 1000) / 10, rmDone: Math.round(tot * pct), rmTotal: tot,
+      phases: p.phases.map((ph, i) => ({ name: ph.name, pct: Math.round((ph.done && (ph.doneOn || "") <= D ? 1 : phasePartsPct(p, i, D) || 0) * 100), rm: vals[i] })),
+      parts: (p.parts || []).filter(alive).map((x) => ({ id: x.id, name: x.name, pct: Math.round(partPctAt(x, D)) })) };
+  }
+  function autoSnapshots() {
+    const thisMonth = today().slice(0, 7);
+    S.projects.forEach((p) => {
+      const dates = (p.parts || []).flatMap((x) => (x.log || []).map((e) => e.date)).sort();
+      if (!dates.length) return;
+      p.snaps = p.snaps || [];
+      let ym = dates[0].slice(0, 7), changed = false, guard = 0;
+      while (ym < thisMonth && guard++ < 240) {
+        if (!p.snaps.some((sn) => sn.month === ym)) { p.snaps.push(Object.assign(makeSnap(p, monthEnd(ym)), { month: ym, auto: true })); changed = true; }
+        ym = shiftMonth(ym, 1);
+      }
+      if (changed) save();
+    });
+  }
+  function snapsCard(p) {
+    const list = (p.snaps || []).slice().sort((a, b) => (b.asOf + b.at).localeCompare(a.asOf + a.at));
+    return '<div class="card mt-16"><div class="card-head"><h2 class="card-title">Progress records (locked)</h2>' + (can.manage() ? '<button class="btn btn-sm btn-soft" data-action="snap-now" data-id="' + p.id + '">Save one now</button>' : "") + "</div>" +
+      '<p class="small muted">Saved at each month end and never changed, so a claim can always be traced back. Later edits do not alter them.</p>' +
+      (list.length ? '<div class="list">' + list.map((sn) => '<div class="li"><div class="li-main"><div class="li-title">' + icon("check", ' style="width:14px;height:14px;vertical-align:-2px"') + " " + (sn.month ? "End of " + MON_LONG[+sn.month.slice(5) - 1] + " " + sn.month.slice(0, 4) : "As at " + fmtDay(sn.asOf)) + '</div><div class="li-sub">' + (can.seeMoney() ? RM(sn.rmDone) + " of " + RM(sn.rmTotal) + " · " : "") + sn.parts.filter((x) => x.pct >= 100).length + " of " + sn.parts.length + " parts done</div></div><span class=\"num\">" + sn.pct + "%</span></div>").join("") + "</div>" : empty("The first record is saved at the end of the month in which the first photo is taken."))
+      + "</div>";
+  }
+  function valueCard(p) {
+    const vals = phaseValues(p), tot = vals.reduce((a, b) => a + b, 0), pct = progress(p);
+    if (!can.seeMoney()) return '<div class="card"><div class="bp-total"><span class="num">' + Math.round(pct * 100) + '%</span><span class="muted small">of the contract value done</span></div></div>';
+    return '<div class="card"><div class="row-between wrap" style="gap:8px"><div class="bp-total"><span class="num">' + Math.round(pct * 100) + '%</span><span class="muted small">of the contract value done: <b>' + RM(Math.round(tot * pct)) + "</b> of " + RM(tot) + "</span></div>" +
+      (can.manage() ? '<button class="btn btn-sm btn-soft" data-action="open-values" data-id="' + p.id + '">' + icon("edit") + "Phase values</button>" : "") + "</div>" +
+      (p.phaseValues ? "" : '<p class="small warn-text">Phase values are estimated from the contract value. Enter the values from the BOQ or quotation for an exact figure.</p>') + "</div>";
   }
 
   /* ---------- Projects ---------- */
@@ -2313,7 +2561,7 @@
   /* ---------- Settings ---------- */
   function stagesCard(dis) {
     const phaseNames = ["Site clearing & piling", "Foundation & ground slab", "Steel structure", "Roofing & wall cladding", "M&E (electrical, plumbing, fire)", "Finishing & handover"];
-    return '<div class="card mt-16"><h2 class="card-title">Blueprint stages</h2><p class="small muted">What each stage of a part is worth. A progress photo moves a part one stage at a time.</p>' +
+    return '<div class="card mt-16"><h2 class="card-title">Blueprint stages</h2><p class="small muted">What each stage of a part is worth. A progress photo moves a part one stage at a time. Values are locked into each photo when it is taken: a change here applies to new photos from today and never rewrites past progress.</p>' +
       PART_ORDER.map((t) => { const pt = S.settings.partTypes[t]; return '<div class="bp-stagecfg"><div class="row-between wrap"><b>' + esc(pt.plural) + '</b><label class="small">Counts towards <select class="input input-sm" data-change="partPhase" data-t="' + t + '"' + dis + ">" + phaseNames.map((n, i) => '<option value="' + i + '"' + (pt.phase === i ? " selected" : "") + ">" + esc(n) + "</option>").join("") + "</select></label></div>" +
         pt.stages.map((st, i) => '<div class="bp-stagerow"><input class="input" data-change="stage" data-t="' + t + '" data-i="' + i + '" data-k="name" value="' + esc(st[0]) + '"' + dis + '><input class="input" type="number" min="0" max="100" data-change="stage" data-t="' + t + '" data-i="' + i + '" data-k="pct" value="' + st[1] + '"' + (i === 0 ? " disabled" : dis) + '><span class="muted">%</span></div>').join("") + "</div>"; }).join("") +
       '<label class="field mt-12"><span>Management approves when one day adds more than (% of the project)</span><input class="input" type="number" min="1" max="100" data-setting="bigJumpPct" value="' + S.settings.bigJumpPct + '"' + dis + "></label></div>";
@@ -2346,7 +2594,7 @@
      6. Sheets (pop-up forms)
      ====================================================================== */
   function openSheet(state) { ui.sheet = Object.assign({ f: {} }, state); renderSheet(); $("#sheetWrap").hidden = false; document.body.style.overflow = "hidden"; setTimeout(() => { const el = $("#sheet [autofocus]"); if (el && window.innerWidth > 760) el.focus(); }, 60); }
-  function closeSheet() { ui.sheet = null; $("#sheetWrap").hidden = true; document.body.style.overflow = ""; }
+  function closeSheet() { stopCamera(); ui.sheet = null; $("#sheetWrap").hidden = true; document.body.style.overflow = ""; }
   function renderSheet() {
     const s = ui.sheet; if (!s) return;
     const fn = SHEETS[s.type];
@@ -2356,6 +2604,8 @@
     el.innerHTML = fn(s);
     el.scrollTop = scroll;
     hydratePhotos();
+    camAttach();
+    if (s.type === "sitemap") mapInit(s);
   }
   const sheetHead = (title) => '<div class="sheet-head"><h2>' + title + '</h2><button class="icon-btn" style="box-shadow:none;background:var(--bg)" data-action="close-sheet" aria-label="Close">' + icon("x") + "</button></div>";
   const F = () => ui.sheet.f;
@@ -2459,65 +2709,112 @@
     part(s) {
       const p = project(s.pid), x = p && (p.parts || []).find((y) => y.id === s.id);
       if (!x) return sheetHead("Part");
-      const t = ptype(x.type), cur = partStage(x), pend = partPending(x), pl = planOf(p, x);
-      const reached = (i) => (x.log || []).find((e) => counts(e) && e.stage === i);
+      const t = ptype(x.type), cur = partStage(x), pend = partPending(x), pl = planOf(p, x), q = partPortion(x);
+      const reached = (i) => (x.log || []).find((e) => counts(e) && e.stage === i && (e.portion || 1) >= 1) || (i === cur && lastCounted(x));
       const ladder = '<div class="bp-ladder">' + t.stages.map((st, i) => {
         const r = reached(i), isPend = pend && pend.stage === i;
-        return '<div class="bp-step' + (i <= cur ? " on" : "") + (i === cur ? " now" : "") + '"><span class="bp-dot">' + (i <= cur && i ? icon("check") : "") + "</span><span><b>" + esc(st[0]) + '</b> <span class="muted small">' + st[1] + "%</span>" +
+        return '<div class="bp-step' + (i <= cur ? " on" : "") + (i === cur ? " now" : "") + '"><span class="bp-dot">' + (i <= cur && i ? icon("check") : "") + "</span><span><b>" + (i === cur && i && q < 1 ? portionTxt(q) : "") + esc(st[0]) + '</b> <span class="muted small">' + st[1] + "%</span>" +
           (r ? '<small class="muted">' + fmtDay(r.date) + ", " + esc(r.by) + "</small>" : isPend ? '<small class="warn-text">Waiting for management</small>' : "") + "</span></div>";
       }).join("") + "</div>";
       const photos = (x.log || []).slice().reverse().map((e) => '<div class="bp-photo">' + img(e.photo, "", x.name + " " + stageName(x, e.stage)) +
-        '<div><b>' + esc(stageName(x, e.stage)) + '</b><div class="small muted">' + fmtDay(e.date) + " " + esc(e.time || "") + ", " + esc(e.by) + "</div>" +
-        (e.status === "pending" ? chip("Waiting for approval", "warn") : e.status === "rejected" ? chip("Sent back" + (e.rejectReason ? ": " + e.rejectReason : ""), "bad") : e.status === "approved" ? chip("Approved by " + (e.approvedBy || "management"), "good") : chip("Counted", "good")) +
+        '<div><b>' + esc(portionTxt(e.portion || 1) + stageName(x, e.stage)) + '</b> <span class="muted small">' + Math.round(entryPct(x, e)) + '%</span><div class="small muted">' + fmtDay(e.date) + " " + esc(e.time || "") + ", " + esc(e.by) + (e.inApp ? " · app camera" : "") + "</div>" +
+        (e.status === "pending" ? chip("Waiting for approval", "warn") : e.status === "rejected" ? chip("Sent back" + (e.rejectReason ? ": " + e.rejectReason : ""), "bad") : e.status === "approved" ? chip("Approved by " + (e.approvedBy || "management") + (e.reviewSecs != null ? " after " + e.reviewSecs + " s review" : ""), "good") : chip("Counted", "good")) +
         (e.reason ? '<div class="small">Reason: “' + esc(e.reason) + "”</div>" : "") +
         (e.flags || []).map((f) => '<div class="bp-flag">' + icon("alert") + "<span>" + esc(f) + "</span></div>").join("") + "</div></div>").join("");
       const edit = can.tick();
       return sheetHead(esc(x.name)) +
         '<p class="muted">' + esc(t.label) + (pl ? " · " + esc(pl.name) : "") + (x.type !== "column" ? " · " + metres(partLen(p, x)) : "") + " · counts towards “" + esc((p.phases[t.phase] || {}).name || "") + "”</p>" +
-        '<div class="bp-big"><span class="num">' + partPct(x) + '%</span><span class="muted">' + esc(stageName(x, cur)) + "</span></div>" + ladder +
-        (edit ? '<div class="sheet-foot" style="margin-top:4px"><button class="btn btn-primary btn-big" data-action="open-progress" data-id="' + p.id + '" data-part="' + x.id + '">' + icon("camera") + "Take progress photo</button></div>" : "") +
+        (x.removed ? '<div class="report">' + icon("alert") + "<div><b>Removed</b> " + fmtDay(x.removed.at.slice(0, 10)) + " by " + esc(x.removed.by) + ": “" + esc(x.removed.reason) + "”. It no longer counts towards progress; its photos are kept.</div>" + (edit ? '<button class="btn btn-sm" data-action="part-restore">Restore</button>' : "") + "</div>" : "") +
+        '<div class="bp-big"><span class="num">' + Math.round(partPct(x)) + '%</span><span class="muted">' + esc(partState(x)) + "</span></div>" + ladder +
+        (edit && !x.removed ? '<div class="sheet-foot" style="margin-top:4px"><button class="btn btn-primary btn-big" data-action="open-progress" data-id="' + p.id + '" data-part="' + x.id + '">' + icon("camera") + "Take progress photo</button></div>" : "") +
         '<h3 class="bp-h3">Photos</h3>' + (photos || empty("No photos yet.")) +
-        (edit ? '<details class="fold mt-16"><summary><div class="grow"><div class="fold-title">Rename or delete</div></div><span class="chev">' + icon("down") + '</span></summary><div class="fold-body">' +
-          '<label class="field"><span>Name</span><input class="input" data-f="pname" value="' + esc(val("pname", x.name)) + '"></label><div class="row wrap" style="gap:8px"><button class="btn btn-sm btn-primary" data-action="part-rename">Save name</button>' +
-          '<button class="btn btn-sm btn-danger" data-action="part-del">' + icon("trash") + (s.confirmDel ? "Tap again to delete " + esc(x.name) : "Delete this part") + "</button></div></div></details>" : "");
+        (edit ? '<details class="fold mt-16"' + (s.foldOpen ? " open" : "") + '><summary><div class="grow"><div class="fold-title">Rename or delete</div></div><span class="chev">' + icon("down") + '</span></summary><div class="fold-body">' +
+          '<label class="field"><span>Name</span><input class="input" data-f="pname" value="' + esc(val("pname", x.name)) + '"></label>' + ((x.log || []).length ? "" : errBox()) + '<div class="row wrap" style="gap:8px"><button class="btn btn-sm btn-primary" data-action="part-rename">Save name</button>' +
+          ((x.log || []).length ? (x.removed ? "" : '</div><label class="field mt-12"><span>This part has photos, so it cannot be deleted. Mark it as removed (it stops counting, photos are kept). Why?</span><textarea class="input" data-f="rmReason" placeholder="e.g. traced twice, wall cancelled in variation order 3">' + esc(val("rmReason", "")) + '</textarea></label>' + errBox() + '<div class="row wrap" style="gap:8px"><button class="btn btn-sm btn-danger" data-action="part-del">' + icon("trash") + "Mark as removed</button>") :
+            '<button class="btn btn-sm btn-danger" data-action="part-del">' + icon("trash") + (s.confirmDel ? "Tap again to delete " + esc(x.name) : "Delete this part") + "</button>") + "</div></div></details>" : "");
     },
     progress(s) {
       const p = project(s.pid);
-      const withParts = S.projects.filter((q) => (q.parts || []).length);
+      const withParts = S.projects.filter((q) => (q.parts || []).some(alive));
       const projSel = role() === "boss" && withParts.length > 1 ? '<label class="field"><span>Project</span><select class="input" data-change="progProject">' + withParts.map((q) => '<option value="' + q.id + '"' + (q.id === s.pid ? " selected" : "") + ">" + esc(q.name) + "</option>").join("") + "</select></label>" : "";
-      if (!p || !(p.parts || []).length) return sheetHead("Progress photo") + projSel + empty("Trace the parts on this project's blueprint first.");
-      const part = p.parts.find((x) => x.id === val("partId")) || null;
+      if (!p || !(p.parts || []).some(alive)) return sheetHead("Progress photo") + projSel + empty("Trace the parts on this project's blueprint first.");
+      const part = p.parts.find((x) => x.id === val("partId") && alive(x)) || null;
       const plans = p.plans.slice().sort((a, b) => a.level - b.level);
       const opts = plans.map((pl) => PART_ORDER.map((t) => {
-        const l = p.parts.filter((x) => x.planId === pl.id && x.type === t); if (!l.length) return "";
+        const l = p.parts.filter((x) => x.planId === pl.id && x.type === t && alive(x)); if (!l.length) return "";
         return '<optgroup label="' + esc(ptype(t).plural + (plans.length > 1 ? ", " + pl.name : "")) + '">' + l.map((x) => '<option value="' + x.id + '"' + (part && part.id === x.id ? " selected" : "") + ">" + esc(x.name + " · " + partSub(p, x)) + "</option>").join("") + "</optgroup>";
       }).join("")).join("");
       let h = sheetHead("Progress photo") + projSel +
         '<label class="field"><span>Which part are you photographing?</span><select class="input" data-f="partId" data-rerender="1"><option value="">Choose a wall, pipe or column…</option>' + opts + "</select></label>";
       const pl = part ? planOf(p, part) : plans[0];
-      if (pl) h += planBoard(p, pl, { mini: true, highlight: part && part.id, pick: "prog-pick" }) + '<p class="small muted" style="margin-top:6px">' + (part ? "The highlighted part is the one you chose. Check it is right." : "Or tap the part on the plan.") + "</p>";
+      if (pl && s.cam !== "live") h += planBoard(p, pl, { mini: true, highlight: part && part.id, pick: "prog-pick" }) + '<p class="small muted" style="margin-top:6px">' + (part ? "The highlighted part is the one you chose. Check it is right." : "Or tap the part on the plan.") + "</p>";
       if (!part) return h;
-      const cur = partStage(part), n = ptype(part.type).stages.length, pend = partPending(part);
-      h += '<div class="bp-now">Now: <b>' + esc(stageName(part, cur)) + "</b> (" + stagePct(part, cur) + "%)</div>";
-      if (pend) return h + '<div class="report">' + icon("clock") + "<div>A photo for <b>" + esc(stageName(part, pend.stage)) + "</b> is waiting for management. You can add the next one after it is approved or sent back.</div></div>";
+      const cur = partStage(part), q = partPortion(part), n = ptype(part.type).stages.length, pend = partPending(part);
+      h += '<div class="bp-now">Now: <b>' + esc(partState(part)) + "</b> (" + Math.round(partPct(part)) + "%)</div>";
+      if (pend) return h + '<div class="report">' + icon("clock") + "<div>A photo for <b>" + esc(portionTxt(pend.portion || 1) + stageName(part, pend.stage)) + "</b> is waiting for management. You can add the next one after it is approved or sent back.</div></div>";
       const dirs = [];
-      if (cur < n - 1) dirs.push(["next", "Next: " + stageName(part, cur + 1) + " (" + stagePct(part, cur + 1) + "%)"]);
+      if (cur > 0 && q < 1) dirs.push(["more", "More of: " + stageName(part, cur)]);
+      if (cur < n - 1 && (cur === 0 || q >= 1)) dirs.push(["next", "Next: " + stageName(part, cur + 1) + " (" + stagePct(part, cur + 1) + "%)"]);
       if (cur > 0) dirs.push(["back", "Go back to: " + stageName(part, cur - 1)]);
-      const dir = val("dir", dirs[0][0]); if (!F().dir) F().dir = dir; s.dir = dir;
+      const dir = dirs.some((d) => d[0] === F().dir) ? F().dir : dirs[0][0]; F().dir = dir; s.dir = dir;
       h += '<div class="field"><span>What does the photo show?</span><div class="choice-row">' + dirs.map(([k, l]) => '<button type="button" class="choice ' + (dir === k ? "on" : "") + '" data-action="pick" data-k="dir" data-v="' + k + '">' + esc(l) + "</button>").join("") + "</div>" +
-        (cur < n - 1 ? '<small class="muted">One stage at a time. ' + esc(stageName(part, Math.min(n - 1, cur + 2))) + (cur + 2 <= n - 1 ? " comes after " + esc(stageName(part, cur + 1)) + "." : "") + "</small>" : "") + "</div>";
-      if (dir === "back") h += '<label class="field"><span>Why is it going back? (needed)</span><textarea class="input" data-f="reason">' + esc(val("reason", "")) + "</textarea></label>";
+        (dir === "next" && cur + 2 <= n - 1 ? '<small class="muted">One stage at a time: ' + esc(stageName(part, cur + 2)) + " comes after " + esc(stageName(part, cur + 1)) + ".</small>" : "") + "</div>";
+      if (dir !== "back") {
+        const po = Object.keys(PORTIONS).filter((k) => dir !== "more" || PORTIONS[k] > q);
+        const cp = po.indexOf(F().portion) >= 0 ? F().portion : "All"; F().portion = cp;
+        h += '<div class="field"><span>How much of the ' + esc(ptype(part.type).label.toLowerCase()) + " is at this stage?</span>" + choiceRow("portion", po, cp) + "</div>";
+      } else h += '<label class="field"><span>Why is it going back? (needed)</span><textarea class="input" data-f="reason">' + esc(val("reason", "")) + "</textarea></label>";
+      if (s.cam === "live") {
+        return h + '<div class="cam-box"><video id="camVideo" playsinline autoplay muted></video><div class="cam-stamp">' + esc(part.name.toUpperCase() + " · " + p.name) + "<br>" + fmtDate(today()) + " " + nowHM() + " · " + (s.geo ? "GPS ±" + Math.round(s.geo.acc) + " m" : "finding GPS…") + "</div></div>" +
+          '<div class="sheet-foot"><button class="btn btn-soft btn-big" data-action="prog-cam-stop">Cancel</button><button class="btn btn-primary btn-big" data-action="prog-snap">' + icon("camera") + "Take photo</button></div>";
+      }
       if (!s.shot) {
-        h += '<button class="w-big mt-8" data-action="prog-photo">' + icon("camera") + "<span>Take photo</span></button>" + (s.busy ? '<p class="small muted mt-8">Checking the photo…</p>' : "") +
-          (!("ontouchstart" in window) ? '<p class="small muted mt-8" style="text-align:center">On a laptop: <button class="link-btn small" data-action="prog-demo">use a demo photo</button> to try the checks.</p>' : "");
-        return h + errBox();
+        return h + '<button class="w-big mt-8" data-action="prog-cam"' + (s.cam === "starting" ? " disabled" : "") + ">" + icon("camera") + "<span>" + (s.cam === "starting" ? "Starting the camera…" : "Take photo") + "</span></button>" +
+          (s.busy ? '<p class="small muted mt-8">Checking the photo…</p>' : "") + (s.camErr ? '<div class="report mt-8">' + icon("alert") + "<div>" + s.camErr + "</div></div>" : "") +
+          '<p class="small muted mt-8" style="text-align:center">The photo is taken inside the app (no gallery) and stamped with the part, time and GPS.</p>' + errBox();
       }
       const ck = progressChecks(p, part, s), hard = ck.some((c) => c.level === "hard"), soft = ck.filter((c) => c.level === "soft" && !c.wait);
       h += '<img class="clock-preview" src="' + s.shot.photo + '" alt="Progress photo">' +
         '<div class="bp-checks">' + ck.map((c) => '<div class="bp-check ' + c.level + '">' + icon(c.level === "ok" ? "check" : c.level === "info" ? "pin" : c.level === "hard" ? "x" : "alert") + "<span>" + esc(c.text) + "</span></div>").join("") + "</div>" +
         (hard ? '<p class="small warn-text">Fix the red item' + (ck.filter((c) => c.level === "hard").length > 1 ? "s" : "") + " and take the photo again.</p>" : soft.length ? '<p class="small">This photo will be saved and sent to management to approve before it counts.</p>' : "") +
-        errBox() + '<div class="sheet-foot"><button class="btn btn-soft btn-big" data-action="prog-photo">Retake</button><button class="btn btn-primary btn-big" data-action="prog-save"' + (hard ? " disabled" : "") + ">" + icon("check") + (soft.length ? "Send for approval" : "Save") + "</button></div>";
+        errBox() + '<div class="sheet-foot"><button class="btn btn-soft btn-big" data-action="prog-cam">Retake</button><button class="btn btn-primary btn-big" data-action="prog-save"' + (hard ? " disabled" : "") + ">" + icon("check") + (soft.length ? "Send for approval" : "Save") + "</button></div>";
       return h;
+    },
+    review(s) {
+      const p = project(s.pid), x = p && p.parts.find((y) => y.id === s.part), e = x && (x.log || []).find((y) => y.id === s.e);
+      if (!e) return sheetHead("Review");
+      if (!s.openedAt) s.openedAt = Date.now();
+      const prev = (x.log || []).filter((y) => counts(y) && y !== e).slice(-1)[0], pl = planOf(p, x);
+      const g = e.geo ? (p.geo ? Math.round(distM(p.geo, e.geo)) + " m from the site pin, GPS ±" + Math.round(e.geo.acc) + " m" : "GPS ±" + Math.round(e.geo.acc) + " m (site not on the map)") : "No GPS";
+      return sheetHead("Review: " + esc(x.name)) +
+        "<p><b>" + esc(x.name) + " → " + esc(portionTxt(e.portion || 1) + stageName(x, e.stage)) + "</b> (" + Math.round(e.prevPct != null ? e.prevPct : 0) + "% → " + Math.round(entryPct(x, e)) + '%)<br><span class="muted small">' + esc(e.by) + ", " + fmtDay(e.date) + " " + esc(e.time || "") + " · " + esc(g) + "</span></p>" +
+        '<div class="rv-pair"><figure>' + (prev ? img(prev.photo, "", "Last photo") + "<figcaption>Last counted: " + esc(portionTxt(prev.portion || 1) + stageName(x, prev.stage)) + ", " + fmtDay(prev.date) + "</figcaption>" : '<div class="photo-missing">No earlier photo</div><figcaption>First photo of this part</figcaption>') + "</figure>" +
+        "<figure>" + img(e.photo, "", "New photo") + "<figcaption><b>New photo</b> (tap to enlarge)</figcaption></figure></div>" +
+        (e.flags || []).map((f) => '<div class="bp-flag">' + icon("alert") + "<span>" + esc(f) + "</span></div>").join("") +
+        (e.reason ? '<p class="small">Reason given: “' + esc(e.reason) + "”</p>" : "") +
+        (pl ? '<p class="small muted mt-8">Where it is:</p>' + planBoard(p, pl, { mini: true, highlight: x.id }) : "") +
+        '<div class="sheet-foot"><button class="btn btn-soft btn-big" data-action="prog-reject" data-pid="' + p.id + '" data-part="' + x.id + '" data-e="' + e.id + '">Send back</button><button class="btn btn-primary btn-big" data-action="prog-approve" data-pid="' + p.id + '" data-part="' + x.id + '" data-e="' + e.id + '">' + icon("check") + "Approve</button></div>";
+    },
+    planscalecheck(s) {
+      return sheetHead("Check the scale") + '<p class="muted">You drew a second line. It measures <b>' + (s.px * s.k).toFixed(2) + " m</b> with the scale you set. What does the drawing say it is?</p>" +
+        '<label class="field"><span>Real length in metres</span><input class="input" type="number" step="0.01" min="0.1" data-f="m" value="' + esc(val("m", "")) + '" autofocus placeholder="e.g. 24"><small class="muted">Millimetres are converted (24 000 = 24 m).</small></label>' +
+        errBox() + '<div class="sheet-foot"><button class="btn btn-primary btn-big" data-action="plan-scalecheck-save">' + icon("check") + "Check</button></div>";
+    },
+    values(s) {
+      const p = project(s.pid), vals = phaseValues(p);
+      const tot = p.phases.reduce((a, ph, i) => a + (parseFloat(String(val("v" + i, vals[i])).replace(/[,\s]/g, "")) || 0), 0);
+      return sheetHead("Phase values") + '<p class="muted">What each phase is worth, from the BOQ or quotation. Progress is the value of work done. Changes are recorded in History; saved monthly records keep their old figures.</p>' +
+        p.phases.map((ph, i) => '<label class="field"><span>' + esc(ph.name) + ' (RM)</span><input class="input" inputmode="numeric" data-f="v' + i + '" data-rerender="1" value="' + esc(String(val("v" + i, vals[i]))) + '"></label>').join("") +
+        '<p class="small">Total <b>' + RM(tot) + "</b>" + (p.value ? " · contract value " + RM(p.value) + (Math.abs(tot - p.value) > 1 ? ' <span class="warn-text">(' + (tot > p.value ? "+" : "") + RM(tot - p.value) + ")</span>" : " ✓") : "") + "</p>" +
+        errBox() + '<div class="sheet-foot"><button class="btn btn-primary btn-big" data-action="values-save">' + icon("check") + "Save values</button></div>";
+    },
+    sitemap(s) {
+      return sheetHead("Site on the map") + '<p class="small muted">Tap the site, or drag the map, so the pin sits in the middle of the site. Set the boundary so it covers the site and not the neighbours.</p>' +
+        '<div id="siteMap" class="site-map"></div>' +
+        '<label class="field mt-12"><span>Boundary: <b id="rVal">' + s.r + " m</b> around the pin</span><input type=\"range\" min=\"30\" max=\"500\" step=\"10\" value=\"" + s.r + '" id="rInput"></label>' +
+        '<div class="row wrap" style="gap:8px"><button class="btn btn-soft" data-action="map-here">' + icon("pin") + "Use my location</button>" + (s.acc ? '<span class="small muted">GPS ±' + Math.round(s.acc) + " m</span>" : "") + "</div>" +
+        (s.mapErr ? '<p class="small warn-text">' + esc(s.mapErr) + "</p>" : "") + errBox() +
+        '<div class="sheet-foot"><button class="btn btn-primary btn-big" data-action="map-save">' + icon("check") + "Save site boundary</button></div>";
     },
     progreject(s) {
       const reasons = ["Wrong part", "Work not finished", "Photo not clear", "Not at this site"];
@@ -3121,11 +3418,13 @@
       const p = project(route().id), pl = p && p.plans.find((x) => x.id === el.dataset.plan); if (!pl) return;
       const r = el.getBoundingClientRect(), k = pl.w / r.width;
       let pt = [(e.clientX - r.left) * k, (e.clientY - r.top) * (pl.h / r.height)];
-      const tool = ui.planTool || "wall", snapR = 14 * k;
+      // snap to the ends of parts already traced: same kind only (pipes to pipes; walls to walls and columns),
+      // within 10 screen pixels but never more than 0.5 m in real life, so a zoomed-out tap cannot jump to a far corner
+      const tool = ui.planTool || "wall", snapR = Math.min(10 * k, pl.scale ? 0.5 / pl.scale : 10 * k);
       // snap to the ends of parts already traced
       let best = null;
-      (p.parts || []).filter((x) => x.planId === pl.id).forEach((x) => [x.a, x.b].filter(Boolean).forEach((q) => { const d = Math.hypot(q[0] - pt[0], q[1] - pt[1]); if (d < snapR && (!best || d < best.d)) best = { d, q }; }));
-      if (best && tool !== "scale") pt = best.q.slice();
+      (p.parts || []).filter((x) => x.planId === pl.id && alive(x) && (x.type === tool || (tool === "wall" && x.type === "column"))).forEach((x) => [x.a, x.b].filter(Boolean).forEach((q) => { const d = Math.hypot(q[0] - pt[0], q[1] - pt[1]); if (d < snapR && (!best || d < best.d)) best = { d, q }; }));
+      if (best && tool !== "scale" && tool !== "scalecheck") pt = best.q.slice();
       pt = [Math.round(pt[0] * 10) / 10, Math.round(pt[1] * 10) / 10];
       if (tool === "column") { p.parts.push({ id: uid("pt"), planId: pl.id, type: "column", name: nextPartName(p, "column"), a: pt, b: null, log: [] }); save(); render(); return; }
       if (!ui.planStart) { ui.planStart = pt; render(); return; }
@@ -3136,6 +3435,7 @@
       const px = Math.hypot(b[0] - a[0], b[1] - a[1]);
       if (px < 4 * k) { ui.planStart = null; render(); return; }   // tapped the same point again: stop
       if (tool === "scale") { ui.planStart = null; openSheet({ type: "planscale", pid: p.id, plan: pl.id, px }); return; }
+      if (tool === "scalecheck") { ui.planStart = null; openSheet({ type: "planscalecheck", pid: p.id, plan: pl.id, px, k: pl.scale || DEFAULT_MPP }); return; }
       p.parts.push({ id: uid("pt"), planId: pl.id, type: tool, name: nextPartName(p, tool), a, b, log: [] });
       ui.planStart = b;   // keep going from the end, like drawing an outline
       save(); render();
@@ -3149,7 +3449,8 @@
       pl.scale = m / s.px;
       s.note = mmNote;
       log("plan", { projectId: p.id, value: "set the scale of " + esc(pl.name) + ": " + m + " m = " + Math.round(s.px) + " px (" + esc(p.name) + ")" });
-      ui.planTool = "wall"; save(); closeSheet(); render(); toast("Scale saved" + mmNote + ". The drawing is about " + Math.round(pl.w * pl.scale) + " m wide. Now trace the walls: tap one end, then the other.");
+      delete pl.scaleCheck;
+      ui.planTool = "scalecheck"; save(); closeSheet(); render(); toast("Scale saved" + mmNote + ". The drawing is about " + Math.round(pl.w * pl.scale) + " m wide. Now check it: tap both ends of another dimension.");
     },
     "plan-undo"(el) {
       const p = project(el.dataset.pid), pl = p.plans.find((x) => x.id === (ui.planFloor || {})[p.id]) || p.plans.slice().sort((a, b) => a.level - b.level)[0];
@@ -3159,6 +3460,7 @@
     },
     "plan-del"(el) {
       const p = project(el.dataset.pid), pl = p.plans.find((x) => x.id === el.dataset.id); if (!pl) return;
+      if (p.parts.some((x) => x.planId === pl.id && (x.log || []).length)) return toast("This floor has parts with photos, so it cannot be removed. Mark those parts as removed instead.", "alert");
       if (ui.planDelConfirm !== pl.id) { ui.planDelConfirm = pl.id; toast("Tap “Remove this floor” again to remove " + esc(pl.name) + " and its " + plural(p.parts.filter((x) => x.planId === pl.id).length, "part") + ".", "alert"); setTimeout(() => { ui.planDelConfirm = null; }, 6000); return; }
       const snap = JSON.stringify({ projects: S.projects });
       p.parts = p.parts.filter((x) => x.planId !== pl.id); p.plans.splice(p.plans.indexOf(pl), 1); p.plans.forEach((x, i) => { x.level = i; });
@@ -3166,18 +3468,14 @@
       done(esc(pl.name) + " removed.", snap, [log("plan", { projectId: p.id, value: "removed the blueprint floor " + esc(pl.name) + " (" + esc(p.name) + ")" })], "trash");
     },
     "plan-geo"(el) {
-      const p = project(el.dataset.id);
-      if (!navigator.geolocation) return toast("This phone cannot share its location.", "alert");
-      toast("Finding your location…", "pin");
-      navigator.geolocation.getCurrentPosition((pos) => {
-        p.geo = { lat: pos.coords.latitude, lng: pos.coords.longitude, acc: pos.coords.accuracy, at: new Date().toISOString() };
-        log("plan", { projectId: p.id, value: "set the site location of " + esc(p.name) + " (±" + Math.round(pos.coords.accuracy) + " m)" });
-        save(); render(); toast("Site location saved.");
-      }, (err) => toast("Could not get the location: " + esc(err.message || "permission denied") + ".", "alert"), { enableHighAccuracy: true, timeout: 15000 });
+      const p = project(el.dataset.id), g = p.geo || {};
+      openSheet({ type: "sitemap", pid: p.id, lat: g.lat, lng: g.lng, r: g.r || 150, acc: g.acc || 0, wide: true });
+      if (g.lat == null) A["map-here"]();
     },
     "part-open"(el) { openSheet({ type: "part", pid: route().name === "plan" ? route().id : (ui.sheet && ui.sheet.pid), id: el.dataset.id }); },
     "part-rename"() {
       const s = ui.sheet, p = project(s.pid), x = p.parts.find((y) => y.id === s.id), nm = (F().pname || "").trim();
+      s.foldOpen = true;
       if (!nm) return fail("Type a name.");
       if (p.parts.some((y) => y !== x && y.name.toLowerCase() === nm.toLowerCase())) return fail("Another part already has that name.");
       log("plan", { projectId: p.id, value: "renamed " + esc(x.name) + " to " + esc(nm) + " (" + esc(p.name) + ")" });
@@ -3185,6 +3483,14 @@
     },
     "part-del"() {
       const s = ui.sheet, p = project(s.pid), x = p.parts.find((y) => y.id === s.id); if (!x) return;
+      s.foldOpen = true;   // keep "Rename or delete" open while confirming
+      if ((x.log || []).length) {   // AC8: parts with photos are never deleted, only marked removed with a reason
+        const reason = (F().rmReason || "").trim();
+        if (!reason) return fail("Say why it is removed.");
+        const snap = JSON.stringify({ projects: S.projects });
+        x.removed = { at: new Date().toISOString(), by: actor().byName, reason }; closeSheet();
+        return done(esc(x.name) + " marked as removed.", snap, [log("plan", { projectId: p.id, value: "marked " + esc(x.name) + " as removed (" + esc(p.name) + "). Reason: “" + esc(reason) + "”" })], "trash");
+      }
       if (!s.confirmDel) { s.confirmDel = true; renderSheet(); return; }
       const snap = JSON.stringify({ projects: S.projects });
       p.parts.splice(p.parts.indexOf(x), 1); closeSheet();
@@ -3197,6 +3503,92 @@
       if (!p || !(p.parts || []).length) { closeSheet(); if (p) location.hash = "#/plan/" + p.id; return toast("Trace the walls, pipes and columns on the blueprint first.", "alert"); }
       openSheet({ type: "progress", pid, f: { partId: (el && el.dataset.part) || "" } });
       progGeo(ui.sheet);
+    },
+    "prog-cam"() { const s = ui.sheet; s.shot = null; startCamera(s); },
+    "prog-cam-stop"() { stopCamera(); ui.sheet.cam = null; renderSheet(); },
+    async "prog-snap"() {
+      const s = ui.sheet, v = document.getElementById("camVideo");
+      if (!v || !v.videoWidth) return toast("The camera is not ready yet.", "alert");
+      const k = Math.min(1, 1600 / Math.max(v.videoWidth, v.videoHeight));
+      const c = document.createElement("canvas"); c.width = Math.round(v.videoWidth * k); c.height = Math.round(v.videoHeight * k);
+      c.getContext("2d").drawImage(v, 0, 0, c.width, c.height);
+      const raw = c.toDataURL("image/jpeg", 0.9);
+      stopCamera(); s.cam = null; s.busy = true; renderSheet();
+      let metrics;
+      try { metrics = await window.PhotoCheck.analyse(raw); } catch (e) { metrics = { lum: 128, sharp: 999, hash: "" }; }
+      const p = project(s.pid), part = p.parts.find((x) => x.id === F().partId);
+      stampPhoto(c, [(part ? part.name.toUpperCase() : "") + " · " + p.name, fmtDate(today()) + " " + nowHM() + " · " + (s.geo ? s.geo.lat.toFixed(5) + ", " + s.geo.lng.toFixed(5) + " ±" + Math.round(s.geo.acc) + " m" : "GPS not available")]);
+      s.busy = false; s.shot = { photo: c.toDataURL("image/jpeg", 0.86), taken: Date.now(), inApp: true, metrics };
+      renderSheet();
+    },
+    "prog-review"(el) { openSheet({ type: "review", pid: el.dataset.pid, part: el.dataset.part, e: el.dataset.e, wide: true }); },
+    "plan-split"(el) {
+      const p = project(el.dataset.pid), pl = p.plans.find((x) => x.id === (ui.planFloor || {})[p.id]) || p.plans.slice().sort((a, b) => a.level - b.level)[0];
+      const k = pl.scale || DEFAULT_MPP, MAX = 8, r1 = (v) => Math.round(v * 10) / 10, L = "abcdefghijklmnopqrstuvwxyz";
+      const cols = p.parts.filter((x) => x.planId === pl.id && x.type === "column" && alive(x));
+      const snap = JSON.stringify({ projects: S.projects });
+      let made = 0; const kept = [];
+      p.parts.filter((x) => x.planId === pl.id && x.type === "wall" && alive(x) && !x.group && x.b).forEach((w) => {
+        const [ax, ay] = w.a, [bx, by] = w.b, Lp = Math.hypot(bx - ax, by - ay), Lm = Lp * k;
+        if (Lm <= 10) return;
+        if ((w.log || []).length) { kept.push(w.name); return; }
+        const ux = (bx - ax) / Lp, uy = (by - ay) / Lp;
+        // split where a column stands on the wall; if none, into equal panels of at most 8 m
+        let cuts = cols.map((c) => { const t = (c.a[0] - ax) * ux + (c.a[1] - ay) * uy, perp = Math.abs((c.a[0] - ax) * uy - (c.a[1] - ay) * ux); return perp * k < 0.6 && t * k > 0.5 && (Lp - t) * k > 0.5 ? t : null; }).filter((v) => v != null).sort((a, b) => a - b);
+        if (!cuts.length) { const n = Math.ceil(Lm / MAX - 0.02); cuts = Array.from({ length: n - 1 }, (_, i) => (Lp * (i + 1)) / n); }
+        const pts = [0].concat(cuts, [Lp]);
+        const panels = pts.slice(1).map((t, i) => ({ id: uid("pt"), planId: pl.id, type: "wall", name: w.name + L[i], group: w.name, a: [r1(ax + ux * pts[i]), r1(ay + uy * pts[i])], b: [r1(ax + ux * t), r1(ay + uy * t)], log: [] }));
+        p.parts.splice(p.parts.indexOf(w), 1, ...panels); made++;
+      });
+      if (!made) return toast(kept.length ? "Walls with photos are not split: " + esc(kept.join(", ")) + "." : "No walls longer than 10 m to split.", "alert");
+      done("Split " + plural(made, "wall") + " into panels" + (kept.length ? " (not split, they have photos: " + esc(kept.join(", ")) + ")" : "") + ".", snap, [log("plan", { projectId: p.id, value: "split " + plural(made, "long wall") + " into panels on " + esc(pl.name) + " (" + esc(p.name) + ")" })]);
+    },
+    "plan-scalecheck-save"() {
+      const s = ui.sheet, p = project(s.pid), pl = p.plans.find((x) => x.id === s.plan);
+      let m = parseFloat(String(F().m || "").replace(/[\s,]/g, ""));
+      if (!(m > 0)) return fail("Type the real length in metres.");
+      if (m >= 500) m = m / 1000;
+      const measured = s.px * pl.scale, diff = ((measured - m) / m) * 100;
+      pl.scaleCheck = { measured, real: m, diff, at: new Date().toISOString() };
+      log("plan", { projectId: p.id, value: "checked the scale of " + esc(pl.name) + ": " + measured.toFixed(2) + " m measured vs " + m + " m on the drawing (" + diff.toFixed(1) + "%)" });
+      ui.planTool = "wall"; save(); closeSheet(); render();
+      toast(Math.abs(diff) > 1 ? "Scale is " + Math.abs(diff).toFixed(1) + "% off on the second dimension. The plan may be skewed or not to scale." : "Scale checked: " + Math.abs(diff).toFixed(1) + "% difference. Good.", Math.abs(diff) > 1 ? "alert" : "check");
+    },
+    "open-values"(el) { openSheet({ type: "values", pid: el.dataset.id }); },
+    "values-save"() {
+      const s = ui.sheet, p = project(s.pid), f = F(), old = phaseValues(p);
+      const vals = p.phases.map((ph, i) => Math.round(parseFloat(String(f["v" + i] != null ? f["v" + i] : old[i]).replace(/[,\s]/g, "")) || 0));
+      if (vals.some((v) => v < 0)) return fail("Values cannot be negative.");
+      if (!vals.some((v) => v > 0)) return fail("Enter at least one value.");
+      const snap = JSON.stringify({ projects: S.projects });
+      p.phaseValues = vals; closeSheet();
+      done("Phase values saved.", snap, [log("plan", { projectId: p.id, value: "set the phase values of " + esc(p.name) + ": " + p.phases.map((ph, i) => esc(ph.name.split(" ")[0]) + " " + RM(vals[i])).join(", ") })]);
+    },
+    "snap-now"(el) {
+      const p = project(el.dataset.id); p.snaps = p.snaps || [];
+      const sn = makeSnap(p, today()); p.snaps.push(sn);
+      log("plan", { projectId: p.id, value: "saved a locked progress record for " + esc(p.name) + ": " + sn.pct + "%" });
+      save(); render(); toast("Progress record saved and locked: " + sn.pct + "%.");
+    },
+    "map-here"() {
+      const s = ui.sheet;
+      if (!navigator.geolocation) { s.mapErr = "This device cannot share its location."; renderSheet(); return; }
+      navigator.geolocation.getCurrentPosition((pos) => { s.lat = pos.coords.latitude; s.lng = pos.coords.longitude; s.acc = pos.coords.accuracy; s.mapErr = ""; if (s.mapMove) s.mapMove(true); renderSheet(); },
+        (err) => { s.mapErr = "Could not get the location: " + (err.message || "permission denied") + "."; renderSheet(); }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
+    },
+    "map-save"() {
+      const s = ui.sheet, p = project(s.pid);
+      if (s.lat == null) return fail("Tap the site on the map first.");
+      const snap = JSON.stringify({ projects: S.projects });
+      p.geo = { lat: s.lat, lng: s.lng, r: s.r, acc: s.acc || 0, at: new Date().toISOString(), by: actor().byName, how: "map" };
+      closeSheet();
+      done("Site boundary saved.", snap, [log("plan", { projectId: p.id, value: "set the site boundary of " + esc(p.name) + " on the map (" + s.r + " m around " + s.lat.toFixed(5) + ", " + s.lng.toFixed(5) + ")" })]);
+    },
+    "part-restore"() {
+      const s = ui.sheet, p = project(s.pid), x = p.parts.find((y) => y.id === s.id); if (!x) return;
+      const snap = JSON.stringify({ projects: S.projects });
+      delete x.removed; renderSheet();
+      done(esc(x.name) + " restored.", snap, [log("plan", { projectId: p.id, value: "restored " + esc(x.name) + " (" + esc(p.name) + ")" })]);
     },
     "prog-pick"(el) { F().partId = el.dataset.id; F().dir = null; ui.sheet.shot = null; renderSheet(); },
     async "prog-photo"() {
@@ -3218,22 +3610,25 @@
       const ck = progressChecks(p, part, s);
       if (ck.some((c) => c.level === "hard")) return fail("The photo did not pass the checks.");
       const flags = ck.filter((c) => c.level === "soft").map((c) => c.text);
-      const cur = partStage(part), stage = s.dir === "back" ? cur - 1 : cur + 1;
+      const cur = partStage(part), tg = progTarget(part, s), stage = tg.stage;
       const snap = JSON.stringify({ projects: S.projects, notifications: S.notifications });
       const ref = await storePhoto(s.shot.photo);
       const by = actor().byName || ROLE_LABEL[role()];
-      const e = { id: uid("pg"), at: new Date().toISOString(), date: today(), time: nowHM(), stage, prevStage: cur, photo: ref, hash: s.shot.metrics.hash, hash2: s.shot.metrics.hash2, metrics: { lum: s.shot.metrics.lum, sharp: s.shot.metrics.sharp, lc: s.shot.metrics.lc, sat: s.shot.metrics.sat, tex: s.shot.metrics.tex }, geo: s.geo || null, demo: !!s.shot.demo, flags, status: flags.length ? "pending" : "ok", by, reason: s.dir === "back" ? F().reason.trim() : "" };
+      const e = { id: uid("pg"), at: new Date().toISOString(), date: today(), time: nowHM(), stage, prevStage: cur, portion: tg.portion, val: tg.val, valPrev: tg.valPrev, prevPct: tg.from, inApp: !!s.shot.inApp, photo: ref, hash: s.shot.metrics.hash, hash2: s.shot.metrics.hash2, metrics: { lum: s.shot.metrics.lum, sharp: s.shot.metrics.sharp, lc: s.shot.metrics.lc, sat: s.shot.metrics.sat, tex: s.shot.metrics.tex, layout: s.shot.metrics.layout }, geo: s.geo || null, demo: !!s.shot.demo, flags, status: flags.length ? "pending" : "ok", by, reason: s.dir === "back" ? F().reason.trim() : "" };
       part.log = part.log || []; part.log.push(e);
       ui.planMode = ui.planMode || {}; ui.planMode[p.id] = "progress";   // show the result on the Progress view
-      const what = part.name + " → " + stageName(part, stage) + " (" + stagePct(part, stage) + "%)";
+      const what = part.name + " → " + portionTxt(tg.portion) + stageName(part, stage) + " (" + Math.round(tg.pct) + "%)";
       if (flags.length) notify({ type: "progress", to: "boss", projectId: p.id, photo: ref, text: what, by, partId: part.id });
       const a = log("progress", { projectId: p.id, value: "photographed " + esc(what) + " (" + esc(p.name) + ")" + (e.reason ? ". Reason: “" + esc(e.reason) + "”" : "") + (flags.length ? ". Sent for approval: " + esc(flags.join(" ")) : "") });
       closeSheet();
       done(flags.length ? esc(what) + " sent to management for approval." : esc(what) + " saved.", snap, [a], flags.length ? "clock" : "check");
     },
     "prog-approve"(el) {
+      if (!ui.sheet || ui.sheet.type !== "review") return A["prog-review"](el);   // only after looking at it side by side
       const p = project(el.dataset.pid), x = p.parts.find((y) => y.id === el.dataset.part), e = x && x.log.find((y) => y.id === el.dataset.e); if (!e) return;
       const snap = JSON.stringify({ projects: S.projects, notifications: S.notifications });
+      e.reviewSecs = Math.round((Date.now() - (ui.sheet.openedAt || Date.now())) / 1000);
+      closeSheet();
       e.status = "approved"; e.approvedBy = actor().byName; e.approvedAt = new Date().toISOString();
       const what = x.name + " → " + stageName(x, e.stage);
       notify({ type: "progress-ok", to: "site", projectId: p.id, text: what, partId: x.id });
@@ -3519,7 +3914,19 @@
     }
     if (c === "stage") {
       const t = S.settings.partTypes[el.dataset.t], st = t && t.stages[+el.dataset.i];
-      if (st) { if (el.dataset.k === "name") st[0] = el.value.trim() || st[0]; else { const v = Math.round(parseFloat(el.value)); if (v >= 0 && v <= 100) st[1] = v; } save(); render(); toast("Saved."); }
+      if (st) {
+        if (el.dataset.k === "name") st[0] = el.value.trim() || st[0];
+        else {
+          const v = Math.round(parseFloat(el.value));
+          if (v >= 0 && v <= 100 && v !== st[1]) {
+            // photos already taken keep the values they were saved with; the new value applies from today
+            S.projects.forEach((pp) => (pp.parts || []).forEach((x) => { if (x.type === el.dataset.t) (x.log || []).forEach((e2) => { if (e2.val == null) { e2.val = stagePct(x, e2.stage); e2.valPrev = stagePct(x, Math.max(0, e2.stage - 1)); } }); }));
+            log("settings", { value: "changed " + esc(t.plural) + " stage “" + esc(st[0]) + "” from " + st[1] + "% to " + v + "% (applies to new photos from today; earlier photos keep their values)" });
+            st[1] = v;
+          }
+        }
+        save(); render(); toast("Saved. Earlier photos keep the values they were taken with.");
+      }
     }
     if (c === "partPhase") { const t = S.settings.partTypes[el.dataset.t]; if (t) { t.phase = +el.value; save(); render(); toast("Saved."); } }
     if (el.dataset.setting) {
